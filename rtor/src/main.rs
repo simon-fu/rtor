@@ -2,7 +2,9 @@ use anyhow::Result;
 use arti_client::{config::TorClientConfigBuilder, TorClient};
 use futures::{AsyncWriteExt, AsyncReadExt};
 
-pub mod socks_runtime;
+pub mod box_socks;
+pub mod box_tcp;
+pub mod util;
 
 // fn main() {
 //     println!("Hello, world!");
@@ -27,7 +29,7 @@ async fn main() -> Result<()> {
     eprintln!("connecting to Tor...");
 
 
-    let runtime = socks_runtime::create("127.0.0.1:7890".to_owned(), None, None)?;
+    let runtime = box_socks::create("127.0.0.1:7890".to_owned(), None, None)?;
     
     let tor_client = TorClient::with_runtime(runtime)
     .config(config)
@@ -58,6 +60,8 @@ async fn main() -> Result<()> {
     stream.read_to_end(&mut buf).await?;
 
     println!("{}", String::from_utf8_lossy(&buf));
+
+    println!("done");
 
     Ok(())
 }
