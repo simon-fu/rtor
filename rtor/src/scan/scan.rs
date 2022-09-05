@@ -3,7 +3,7 @@
 use std::{time::Duration, collections::HashSet, marker::PhantomData};
 
 use anyhow::{Result, bail};
-use async_channel::{TrySendError, TryRecvError};
+use super::async_channel::{TrySendError, TryRecvError};
 use futures::Future;
 use tokio::{fs::File, io::AsyncWriteExt, time::Instant};
 
@@ -182,23 +182,19 @@ where
 
     let mut last_relay = relays.next().map(|v|v.into());
     let mut num_sent = 0;
-    // let mut last_print = (Instant::now(), num_sent);
+
     let mut last_print = IntervalLog::new(3, |ctx| {
         dbgi!("kick scannings {}", *ctx);
     });
+
     while last_relay.is_some() {
         num_sent += try_send_until_full(&mut relays, &scanner, &mut last_relay)?;
         last_print.update(&num_sent);
-
-        // if last_print.0.elapsed() >= Duration::from_secs(3) && last_print.1 < num_sent {
-        //     dbgi!("kick scannings {}", num_sent);
-        //     last_print = (Instant::now(), num_sent);
-        // }
         
         recv_until_empty(&rr, ctx, func).await?;
     }
     last_print.finish(&num_sent);
-    dbgi!("kick all scannings {}", num_sent);
+    dbgi!("kicked all scannings {}", num_sent);
 
     try_recv_until_empty(&rr, ctx, func).await?;
     dbgi!("recv until empty done");

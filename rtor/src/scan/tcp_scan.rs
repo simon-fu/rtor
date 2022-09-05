@@ -1,6 +1,6 @@
 
 use std::{net::SocketAddr, time::Duration};
-use async_channel::{RecvError, TryRecvError};
+use super::async_channel::{self, RecvError, TryRecvError};
 use tokio::{net::TcpStream, task::JoinHandle};
 use anyhow::{Result, bail};
 use tracing::Instrument;
