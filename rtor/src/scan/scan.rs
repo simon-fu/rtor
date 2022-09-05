@@ -2,10 +2,10 @@
 
 use std::{time::Duration, collections::HashSet, marker::PhantomData};
 
-use anyhow::{Result, bail};
-use super::async_channel::{TrySendError, TryRecvError};
+use anyhow::{Result, bail, Context};
+use async_channel::{TrySendError, TryRecvError};
 use futures::Future;
-use tokio::{fs::File, io::AsyncWriteExt, time::Instant};
+use tokio::{fs::File, io::{AsyncWriteExt, BufReader, AsyncBufReadExt}, time::Instant};
 
 
 use super::{tcp_scan::{ResultReceiver, TcpScanner}, RelayInfo, HashRelay};
@@ -48,6 +48,21 @@ where
     }
 }
 
+
+pub async fn read_set_from_file(file: &str) -> Result<HashSet<HashRelay>> {
+    let file = File::open(file).await.with_context(||format!("Failed to open file [{}]", file))?;
+
+    let reader = BufReader::new(file);
+
+    let mut lines = reader.lines();
+
+    let mut set = HashSet::new();    
+    while let Some(line) = lines.next_line().await.expect("Failed to read file") {
+        let relay: RelayInfo = serde_json::from_str(&line)?;
+        set.insert(HashRelay(relay));
+    }
+    Ok(set)
+}
 
 pub async fn scan_relays_to_set<I>(relays: I, timeout: Duration, concurrency: usize, output: &mut HashSet<HashRelay>) -> Result<()>
 
@@ -196,14 +211,15 @@ where
     last_print.finish(&num_sent);
     dbgi!("kicked all scannings {}", num_sent);
 
-    try_recv_until_empty(&rr, ctx, func).await?;
-    dbgi!("recv until empty done");
+    scanner.close_send();
+    try_recv_until_closed(&rr, ctx, func).await?;
+    dbgi!("recv until closed done");
 
     scanner.wait_for_finished().await;
     dbgi!("scanner finished");
 
-    try_recv_until_closed(&rr, ctx, func).await?;
-    dbgi!("recv until closed done");
+    // try_recv_until_closed(&rr, ctx, func).await?;
+    // dbgi!("recv until closed done");
 
     Ok(())
 }
@@ -287,6 +303,31 @@ where
     }
 }
 
+// async fn try_recv_until_closed<C, F>(rr: &ResultReceiver<RelayInfo>, ctx: &mut C, func: &F) -> Result<()> 
+// where
+//     F: for<'local> Handler<'local, C>,
+// { 
+
+//     loop {
+//         let r = rr.try_recv();
+//         match r {
+//             Ok(r) => {
+//                 func.call(ctx, r).await?;
+//             },
+//             Err(e) => {
+//                 match e {
+//                     TryRecvError::Empty => {
+//                         bail!("try recv until closed but empty")
+//                     },
+//                     TryRecvError::Closed => {
+//                         return Ok(())
+//                     },
+//                 }
+//             },
+//         }
+//     }
+// }
+
 async fn try_recv_until_closed<C, F>(rr: &ResultReceiver<RelayInfo>, ctx: &mut C, func: &F) -> Result<()> 
 where
     F: for<'local> Handler<'local, C>,
@@ -297,21 +338,40 @@ where
         match r {
             Ok(r) => {
                 func.call(ctx, r).await?;
-
             },
             Err(e) => {
                 match e {
-                    TryRecvError::Empty => {
-                        bail!("try recv until closed but empty")
-                    },
                     TryRecvError::Closed => {
                         return Ok(())
                     },
+
+                    TryRecvError::Empty => {
+                        return recv_until_closed(rr, ctx, func).await
+                    },
+   
                 }
             },
         }
     }
 }
+
+async fn recv_until_closed<C, F>(rr: &ResultReceiver<RelayInfo>, ctx: &mut C, func: &F) -> Result<()> 
+where
+    F: for<'local> Handler<'local, C>,
+{
+    loop {
+        let r = rr.recv().await;
+        match r {
+            Ok(r) => {
+                func.call(ctx, r).await?;
+            },
+            Err(_e) => {
+                return Ok(())
+            },
+        }
+    } 
+}
+
 
 
 fn try_send_until_full<I>(relays: &mut I, scanner: &TcpScanner<RelayInfo>, last: &mut Option<RelayInfo>) -> Result<usize>

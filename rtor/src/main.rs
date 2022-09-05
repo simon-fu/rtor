@@ -2,7 +2,7 @@
 // 申请bridge https://bridges.torproject.org/
 // 
 
-use std::{str::FromStr, sync::Arc, time::Duration, collections::HashSet};
+use std::{str::FromStr, sync::Arc, time::Duration};
 
 use anyhow::{Result, Context};
 use arti_client::{config::TorClientConfigBuilder, TorClient, StreamPrefs};
@@ -87,25 +87,29 @@ async fn manual_download_dir() -> Result<()> {
     dbgd!("pull_netdir done");
 
     tokio::time::sleep(Duration::from_secs(5)).await;
+
     dbgd!("start scanning relays...");
-    let concurrency = 4;
+    let concurrency = 50;
+    const FILE_PATH1: &str = "/tmp/scan_relays_1.txt";
+    const FILE_PATH_FINAL: &str = "/tmp/scan_relays_final.txt";
+
     // let relays = netdir.relays()
     // .filter(|v|v.is_flagged_guard())
     // .map(|v|v.into());
-    // scan::scan_relays_to_file(relays, Duration::from_secs(3), 10, "/tmp/scan_relays.txt").await?;
+    // scan::scan_relays_to_file(relays, Duration::from_secs(3), 10, FILE_PATH1).await?;
 
     let relays = netdir.relays()
     // .filter(|v|v.is_flagged_guard())
-    .take(concurrency * 3 + 1)
+    // .take(concurrency * 3 + 1)
     .map(|v|v.into());
     
-    let mut set1 = HashSet::new();
-    scan::scan_relays_to_set(relays, Duration::from_secs(3), concurrency, &mut set1).await?;
-    dbgd!("first scan done with relays [{}]", set1.len());
+    // scan::scan_relays_to_file(relays, Duration::from_secs(3), concurrency, FILE_PATH1).await?;
+    // let relays = scan::read_set_from_file(FILE_PATH1).await?;
+    // dbgd!("first scan done with relays [{}]", relays.len());
+    // let relays = relays.into_iter()
+    // .map(|v|v.0);
 
-    let relays = set1.into_iter()
-    .map(|v|v.0);
-    scan::scan_relays_to_file(relays, Duration::from_secs(3), concurrency, "/tmp/scan_relays.txt").await?;
+    scan::scan_relays_to_file(relays, Duration::from_secs(3), concurrency, FILE_PATH_FINAL).await?;
 
     // // let guard_ids = vec![
     // //     fallback::make_ed25519_id("FK7SwWET47+2UjP1b03TqGbGo4uJnjhomp4CnH7Ntv8"),

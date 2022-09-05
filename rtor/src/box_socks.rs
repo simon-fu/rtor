@@ -295,7 +295,8 @@ async fn do_connect_to(
         let addr0 = addr.to_string(); 
         let use_socks = check_use_socks(socks_args, &addr0, targets);
         if use_socks  {
-            let stream = connect_to_with_socks(socks_args, addr).await?;
+            // let stream = connect_to_with_socks(socks_args, addr).await?;
+            let stream = tokio::time::timeout(TIMEOUT, connect_to_with_socks(socks_args, addr)).await??;
             targets.lock().socks_targets.insert(addr0);
             return Ok(stream)
         }

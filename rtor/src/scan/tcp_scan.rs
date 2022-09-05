@@ -1,13 +1,13 @@
 
 use std::{net::SocketAddr, time::Duration};
-use super::async_channel::{self, RecvError, TryRecvError};
+use async_channel::{self, RecvError, TryRecvError};
 use tokio::{net::TcpStream, task::JoinHandle};
 use anyhow::{Result, bail};
 use tracing::Instrument;
 
 macro_rules! dbgd {
     ($($arg:tt)* ) => (
-        tracing::info!($($arg)*) // comment out this line to disable log
+        // tracing::debug!($($arg)*) // comment out this line to disable log
     );
 }
 
@@ -63,10 +63,15 @@ where
         }
     }
 
-    pub async fn wait_for_finished(&mut self) {
-        self.tx.take();
+    pub fn close_send(&mut self) { 
+        if let Some(tx) = self.tx.take() {
+            tx.close();
+        }
+    }
+
+    pub async fn wait_for_finished(&mut self) {         
         while let Some(task) = self.tasks.pop() {
-            dbgd!("remains tasks [{}]", self.tasks.len());
+            // dbgd!("remains tasks [{}]", self.tasks.len());
             let _r = task.await;
         }
     }
@@ -102,7 +107,7 @@ async fn scan_task<T>(
 where 
     for<'a> T: GetAddrs<'a> + Send + Sync + 'static,
 { 
-    let mut try_targets = 0;
+    let mut _try_targets = 0;
     loop {
         let r = rx.recv().await;
         match r {
@@ -110,8 +115,8 @@ where
                 let mut result = Ok(());
                 for addr in next.get_addrs() {
                     let r = connect_with_timeout(addr, timeout).await;
-                    try_targets += 1;
-                    dbgd!("No.{} connect result: [{}] -> [{:?}]", try_targets, addr, r);
+                    _try_targets += 1;
+                    dbgd!("No.{} connect result: [{}] -> [{:?}]", _try_targets, addr, r);
                     if r.is_ok() {
                         break;
                     }
