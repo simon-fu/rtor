@@ -11,8 +11,35 @@ tokio-util = { version = "0.7.0", features = ["compat"] }
 futures = "0.3.14"
 anyhow = "1.0.23"
 cfg-if = "1.0.0"
+parking_lot = "=0.11.2"
+
+tracing = "0.1.18"
+tracing-appender = "0.2.0"
+tracing-journald = { version = "0.3.0", optional = true }
+tracing-subscriber = { version = "0.3.0", features = ["env-filter"] }
+
+rand = "0.8.5"
+base64 = "0.13.0"
+strum = { version = "0.24", features = ["derive"] }
+async-channel = "1.7.1"
+serde = "=1.0.126"
+serde_derive = "=1.0.126"
+serde_json = "=1.0.65"
 
 fast-socks5 = "0.8.1"
-arti-client = "0.5.0"
-tor-rtcompat = "0.5.0"
+
+# arti-client = { version = "0.5.0", features = [ "dirfilter", "experimental-api" ]}
+# tor-rtcompat = { version = "0.5.0", features = [ ]}
+# tor-llcrypto = { version = "0.3.3", features = [ ]}
+# tor-netdir = { version = "0.5.0", features = [ "experimental-api" ]}
+
+arti-client = { path="/Users/simon/simon/src/study/p2p-im/arti/crates/arti-client",  version = "0.5.0", features = [ "dirfilter", "experimental-api" ]}
+tor-rtcompat = { path="/Users/simon/simon/src/study/p2p-im/arti/crates/tor-rtcompat", version = "0.5.0", features = [ ]}
+tor-llcrypto = { path="/Users/simon/simon/src/study/p2p-im/arti/crates/tor-llcrypto", version = "0.3.3", features = [ ]}
+tor-netdir = { path="/Users/simon/simon/src/study/p2p-im/arti/crates/tor-netdir", version = "0.5.0", features = [ "experimental-api" ]}
+tor-netdoc = { path="/Users/simon/simon/src/study/p2p-im/arti/crates/tor-netdoc", version = "0.5.0", features = [ ]}
+
+
+
+
 
