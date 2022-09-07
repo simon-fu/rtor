@@ -40,9 +40,10 @@ pub struct SocksArgs {
 /// TODO: add doc
 pub type SocksRuntime<R> = CompoundRuntime<R, R, SocksTcpProvider<R>, R, R>;
 
+pub type SocksPrefRuntime = SocksRuntime<tor_rtcompat::PreferredRuntime>;
 
 /// TODO: add doc
-pub fn create_runtime(socks_args: Option<SocksArgs>) -> std::io::Result<SocksRuntime<tor_rtcompat::PreferredRuntime>> 
+pub fn create_runtime(socks_args: Option<SocksArgs>) -> std::io::Result<SocksPrefRuntime> 
 {
 
     // 不推荐用这种方式创建runtime，因为如果tokio 还没初始化会失败
@@ -130,11 +131,7 @@ where
 /// TODO: add doc
 #[derive(Clone)]
 pub struct SocksTcpProvider<R> {
-    // socks_server: String, // eg. `127.0.0.1:1080`
-
-    // username: Option<String>,
-
-    // password: Option<String>,
+  
     socks_args: Option<SocksArgs>,
 
     rt: R,
@@ -320,6 +317,8 @@ async fn do_connect_to(
                 dbgd!("====== direct tcp connected [{}]", addr);
             }
             return Ok(box_tcp_stream(stream.compat()));
+            // let stream = crate::box_tcp::TcpDebug::new(stream.compat());
+            // return Ok(box_tcp_stream(stream))
         },
         Err(e) => {
             dbgd!("====== fail to direct tcp connect to [{}], error [{:?}]", addr, e);
@@ -364,6 +363,9 @@ async fn connect_to_with_socks(
 
     let stream = r?;
     Ok(box_tcp_stream(stream.compat()))
+    // let stream = crate::box_tcp::TcpDebug::new(stream.compat());
+    // Ok(box_tcp_stream(stream))
+
 }
 
 

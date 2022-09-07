@@ -11,6 +11,13 @@ use std::io::Result as IoResult;
 use tor_rtcompat::TcpListener;
 use futures::{FutureExt, Stream, AsyncRead, AsyncWrite};
 
+// use rand::{distributions::Alphanumeric, Rng};
+// macro_rules! dbgd {
+//     ($($arg:tt)* ) => (
+//         tracing::info!($($arg)*) // comment out this line to disable log
+//     );
+// }
+
 /// TODO: add doc
 pub trait AsyncStreamTrait: AsyncRead + AsyncWrite + Send + Sync + Unpin + 'static {}
 impl<T: AsyncRead + AsyncWrite + Send + Sync + Unpin + 'static> AsyncStreamTrait for T {}
@@ -121,3 +128,84 @@ where
         }
     }
 }
+
+
+
+// pub struct TcpDebug<S>(S, String);
+
+// impl<S> TcpDebug<S> {
+//     pub fn new(inner: S) -> Self {
+//         let txid: String = rand::thread_rng()
+//         .sample_iter(&Alphanumeric)
+//         .take(7)
+//         .map(char::from)
+//         .collect();
+
+//         let self0 = Self(inner, txid);
+//         debug_tcp(&self0, "new", &());
+//         self0
+//     }
+// }
+
+// impl<S> Drop for TcpDebug<S> {
+//     fn drop(&mut self) {
+//         debug_tcp(&self, "drop", &());
+//     }
+// }
+
+
+// impl<S> AsyncRead for TcpDebug<S> 
+// where
+//     S: AsyncRead + Unpin
+// {
+//     fn poll_read(
+//             mut self: Pin<&mut Self>,
+//             cx: &mut Context<'_>,
+//             buf: &mut [u8],
+//         ) -> Poll<IoResult<usize>> {
+//         let r = Pin::new(&mut self.0).poll_read(cx, buf);
+//         debug_tcp(&self.pointer, "poll_read", &r);
+//         r
+//     }
+// }
+
+// impl<S> AsyncWrite for TcpDebug<S> 
+// where
+//     S: AsyncWrite + Unpin
+// {
+//     fn poll_write(
+//             mut self: Pin<&mut Self>,
+//             cx: &mut Context<'_>,
+//             buf: &[u8],
+//         ) -> Poll<IoResult<usize>> {
+//         let r = Pin::new(&mut self.0).poll_write(cx, buf);
+//         debug_tcp(&self.pointer, "poll_close", &r);
+//         r
+//     }
+
+//     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+//         let r = Pin::new(&mut self.0).poll_flush(cx);
+//         dbgd!("poll_flush {:?}", r);
+//         debug_tcp(&self.pointer, "poll_close", &r);
+//         r
+//     }
+
+//     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+//         let r = Pin::new(&mut self.0).poll_close(cx);
+//         debug_tcp(&self.pointer, "poll_close", &r);
+//         r
+//     }
+// }
+
+// fn debug_tcp<S, V: std::fmt::Debug>(obj: &TcpDebug<S>, func_name: &str, value: &V) {
+//     debug_obj("TcpDebug", &obj.1, func_name, value);
+// }
+
+// fn debug_obj<T, V: std::fmt::Debug>(type_name: &str, obj: &T, func_name: &str, value: &V) 
+// where
+//     T: std::fmt::Display,
+// {
+//     // let type_name = std::any::type_name::<T>();
+//     // let type_name = "TcpDebug";
+//     dbgd!("[{}]-{}::{} [{:?}]", obj, type_name, func_name, value);
+// }

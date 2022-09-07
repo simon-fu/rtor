@@ -32,6 +32,8 @@ serde_derive = "=1.0.126"
 serde_json = "=1.0.65"
 
 fast-socks5 = "0.8.1"
+tokio-stream = "0.1.9"
+socks5-proto = "0.3.2"
 
 # arti-client = { version = "0.5.0", features = [ "dirfilter", "experimental-api" ]}
 # tor-rtcompat = { version = "0.5.0", features = [ ]}
@@ -43,8 +45,8 @@ tor-rtcompat = { path="/Users/simon/simon/src/study/p2p-im/arti/crates/tor-rtcom
 tor-llcrypto = { path="/Users/simon/simon/src/study/p2p-im/arti/crates/tor-llcrypto", version = "0.3.3", features = [ ]}
 tor-netdir = { path="/Users/simon/simon/src/study/p2p-im/arti/crates/tor-netdir", version = "0.5.0", features = [ "experimental-api" ]}
 tor-netdoc = { path="/Users/simon/simon/src/study/p2p-im/arti/crates/tor-netdoc", version = "0.5.0", features = [ ]}
-
-
+tor-guardmgr = { path = "/Users/simon/simon/src/study/p2p-im/arti/crates/tor-guardmgr", version = "0.5.0" }
+tor-linkspec = { path = "/Users/simon/simon/src/study/p2p-im/arti/crates/tor-linkspec", version = "0.4.0" }
 
 
 

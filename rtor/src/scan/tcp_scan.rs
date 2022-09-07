@@ -1,9 +1,11 @@
 
 use std::{net::SocketAddr, time::Duration};
-use async_channel::{self, RecvError, TryRecvError};
+// use async_channel::{self, RecvError, TryRecvError};
 use tokio::{net::TcpStream, task::JoinHandle};
 use anyhow::{Result, bail};
 use tracing::Instrument;
+
+use crate::util::{AsyncHandler, recv_until_empty, try_send_until_full, recv_until_closed};
 
 macro_rules! dbgd {
     ($($arg:tt)* ) => (
@@ -11,20 +13,20 @@ macro_rules! dbgd {
     );
 }
 
-#[derive(Clone)]
-pub struct ResultReceiver<T>{
-    rx:async_channel::Receiver<(T, Result<()>)>,
-}
+// #[derive(Clone)]
+// pub struct ResultReceiver<T>{
+//     rx:async_channel::Receiver<(T, Result<()>)>,
+// }
 
-impl<T> ResultReceiver<T> {
-    pub async fn recv(&self) -> Result<(T, Result<()>), RecvError> {
-        self.rx.recv().await
-    }
+// impl<T> ResultReceiver<T> {
+//     pub async fn recv(&self) -> Result<(T, Result<()>), RecvError> {
+//         self.rx.recv().await
+//     }
 
-    pub fn try_recv(&self) -> Result<(T, Result<()>), TryRecvError> {
-        self.rx.try_recv()
-    }
-}
+//     pub fn try_recv(&self) -> Result<(T, Result<()>), TryRecvError> {
+//         self.rx.try_recv()
+//     }
+// }
 
 pub struct TcpScanner<T> {
     tasks: Vec<JoinHandle<Result<()>>>,
@@ -56,12 +58,12 @@ where
         Self { tasks, tx: Some(tx0), rx: Some(rx1) } 
     }
 
-    pub fn result_recver(&self) -> Result<ResultReceiver<T>> {
-        match &self.rx {
-            Some(rx) => Ok(ResultReceiver{rx: rx.clone()}),
-            None => bail!("already closed"),
-        }
-    }
+    // pub fn result_recver(&self) -> Result<ResultReceiver<T>> {
+    //     match &self.rx {
+    //         Some(rx) => Ok(ResultReceiver{rx: rx.clone()}),
+    //         None => bail!("result_recver but closed"),
+    //     }
+    // }
 
     pub fn close_send(&mut self) { 
         if let Some(tx) = self.tx.take() {
@@ -76,21 +78,69 @@ where
         }
     }
 
-    pub fn try_add(&self, target: T) -> Result<(), async_channel::TrySendError<T>> {
-        match &self.tx {
-            Some(tx) => tx.try_send(target),
-            None => Err(async_channel::TrySendError::Closed(target)),
-        }
-    }
+    // pub fn try_send(&self, target: T) -> Result<(), async_channel::TrySendError<T>> {
+    //     match &self.tx {
+    //         Some(tx) => tx.try_send(target),
+    //         None => Err(async_channel::TrySendError::Closed(target)),
+    //     }
+    // }
 
-    pub async fn add(&self, target: T) -> Result<(), async_channel::SendError<T>> {
+
+    pub async fn send(&self, target: T) -> Result<(), async_channel::SendError<T>> {
         if let Some(tx) = &self.tx {
             tx.send(target).await
         } else {
             Err(async_channel::SendError(target))
         }
     }
+
+    pub fn try_send_until_full<I>(&self, relays: &mut I, last: &mut Option<T>) -> Result<usize>
+    where 
+        I: Iterator<Item = T>
+    {
+        let tx = match &self.tx {
+            Some(tx) => tx,
+            None => bail!("try_send_until_full but closed"),
+        };
+
+        try_send_until_full(tx, relays, last)
+
+    }
+
+    pub async fn recv_until_empty<C, F>(&self, ctx: &mut C, func: &F) -> Result<()> 
+    where
+        F: for<'local> AsyncHandler<'local, C, (T, Result<()>)>
+
+    { 
+        let rx = match &self.rx {
+            Some(rx) => rx,
+            None => bail!("recv_until_empty but closed"),
+        };
+
+        recv_until_empty(rx, ctx, func).await
+    }
+
+    pub async fn recv_until_closed<C, F>(mut self, ctx: &mut C, func: &F) -> Result<()> 
+    where
+        F: for<'local> AsyncHandler<'local, C, (T, Result<()>)>,
+    {
+        self.close_send();
+
+        let rx = match &self.rx {
+            Some(rx) => rx,
+            None => bail!("recv_until_closed but closed"),
+        };
+        recv_until_closed(rx, ctx, func).await?;
+
+        self.wait_for_finished().await;
+        Ok(())
+    }
+
+
 }
+
+
+
 
 pub trait GetAddrs<'a> {
     type Iter: Iterator<Item = &'a SocketAddr> + Send;
@@ -127,20 +177,10 @@ where
             Err(_) => return Ok(()),
         }
     }
-    // Ok(())
 }
 
 async fn connect_with_timeout(addr: &SocketAddr, timeout: Duration) -> Result<()> {
-    let _s = tokio::time::timeout(timeout, TcpStream::connect(addr)).await??;
-    // for _ in 0..2 {
-    //     let _s = tokio::time::timeout(timeout, TcpStream::connect(addr)).await??;
-    //     let peer_addr = _s.peer_addr()?;
-    //     // println!("peer_addr {}", peer_addr);
-    //     // s.readable().await?;
-    //     // s.shutdown().await?;
-    //     tokio::time::sleep(Duration::from_secs(1)).await
-    // }
-    
+    let _s = tokio::time::timeout(timeout, TcpStream::connect(addr)).await??;    
     Ok(())
 }
 

@@ -1,16 +1,22 @@
 use std::{net::SocketAddr, hash::Hash};
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use serde::{Serialize, Serializer, ser::SerializeStruct, Deserialize};
+use tor_guardmgr::fallback::FallbackDir;
+use tor_guardmgr::fallback::FallbackDirBuilder;
 use tor_llcrypto::pk::ed25519::Ed25519Identity;
+use tor_llcrypto::pk::rsa::RsaIdentity;
 use tor_netdir::Relay;
 use tor_netdoc::doc::netstatus::RelayFlags;
-
+use tor_linkspec::HasRelayIds;
+// use tor_linkspec::HasRelayIdsLegacy;
+use tor_linkspec::HasAddrs;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RelayInfo {
-    id: Ed25519Identity,
-    addrs: Vec<SocketAddr>,
-    flags: RelayFlagsInfo,
+    pub id: Ed25519Identity,
+    pub rsa_id: RsaIdentity,
+    pub addrs: Vec<SocketAddr>,
+    pub flags: RelayFlagsInfo,
 }
 
 impl RelayInfo {
@@ -19,15 +25,74 @@ impl RelayInfo {
     }
 }
 
-impl From<Relay<'_>> for RelayInfo {
-    fn from(relay: Relay<'_>) -> Self {
-        Self { 
+impl TryFrom<Relay<'_>> for RelayInfo {
+    type Error = anyhow::Error;
+
+    fn try_from(relay: Relay<'_>) -> Result<Self, Self::Error> {
+        Ok(Self { 
             id: relay.id().clone(),
+            rsa_id: relay.rsa_identity().ok_or_else(||anyhow!("no rsa_identity"))?.clone(),
             addrs: relay.rs().addrs().into(),
             flags: RelayFlagsInfo(*relay.rs().flags()),
+        })
+    }
+}
+
+// impl From<Relay<'_>> for RelayInfo {
+//     fn from(relay: Relay<'_>) -> Self {
+//         Self { 
+//             id: relay.id().clone(),
+//             ed_id: relay.ed_identity().clone(),
+//             addrs: relay.rs().addrs().into(),
+//             flags: RelayFlagsInfo(*relay.rs().flags()),
+//         }
+//     }
+// }
+
+impl From<&FallbackDir> for RelayInfo {
+    fn from(relay: &FallbackDir) -> Self {
+        Self { 
+            id: relay.ed_identity().expect("fallback dir has no ed-id").clone(),
+            rsa_id: relay.rsa_identity().expect("fallback dir has no rsa_identity").clone(),
+            addrs: relay.addrs().into(),
+            flags: RelayFlagsInfo(RelayFlags::HSDIR),
         }
     }
 }
+
+impl From<&RelayInfo> for FallbackDirBuilder {
+    fn from(relay: &RelayInfo) -> Self {
+        let mut bld = FallbackDir::builder();
+        bld
+        .rsa_identity(relay.rsa_id.clone())
+        .ed_identity(relay.id.clone());
+
+        relay.addrs.iter()
+        .for_each(|p| {
+                bld.orports().push(p.clone());
+        });
+
+        bld
+    }
+}
+
+impl From<RelayInfo> for FallbackDirBuilder {
+    fn from(relay: RelayInfo) -> Self {
+        let mut bld = FallbackDir::builder();
+        bld
+        .rsa_identity(relay.rsa_id)
+        .ed_identity(relay.id);
+
+        relay.addrs.into_iter()
+        .for_each(|p| {
+                bld.orports().push(p);
+        });
+
+        bld
+    }
+}
+
+
 
 impl<'a> GetAddrs<'a> for RelayInfo {
     type Iter = std::slice::Iter<'a, SocketAddr>;
@@ -37,7 +102,7 @@ impl<'a> GetAddrs<'a> for RelayInfo {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct RelayFlagsInfo(RelayFlags);
+pub struct RelayFlagsInfo(pub RelayFlags);
 
 impl Serialize for RelayFlagsInfo
 {
@@ -144,6 +209,7 @@ fn test_relay_info() -> Result<()> {
     use std::net::{IpAddr, Ipv4Addr};
     let relay = RelayInfo {
         id: Ed25519Identity::new([1; 32]),
+        rsa_id: RsaIdentity::from_hex("EF18418EE9B5E5CCD0BB7546869AC10BA625BAC8").expect("wrong hex"),
         addrs: vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080)],
         flags: RelayFlagsInfo(RelayFlags::EXIT | RelayFlags::GUARD),
     };
