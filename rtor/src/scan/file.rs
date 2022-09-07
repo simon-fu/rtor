@@ -1,6 +1,8 @@
 use std::{time::Duration, collections::HashSet, path::Path};
 use anyhow::{Result, Context};
-use tokio::{fs::{File, self}, io::{AsyncWriteExt, BufReader, AsyncBufReadExt, Lines}};
+use tokio::{fs::File, io::{AsyncWriteExt, BufReader, AsyncBufReadExt, Lines}};
+use crate::util;
+
 use super::{RelayInfo, HashRelay, scan_relays, ScanResult};
 
 macro_rules! dbgi {
@@ -9,8 +11,8 @@ macro_rules! dbgi {
     );
 }
 
-pub async fn open_result_file(file: &str) -> Result<ScanResultFile> {
-    let file = File::open(file).await.with_context(||format!("Failed to open file [{}]", file))?;
+pub async fn open_result_filepath(file: impl AsRef<Path>) -> Result<ScanResultFile> {
+    let file = File::open(&file).await.with_context(||format!("Failed to open file [{:?}]", file.as_ref()))?;
 
     let reader = BufReader::new(file);
 
@@ -18,8 +20,8 @@ pub async fn open_result_file(file: &str) -> Result<ScanResultFile> {
     Ok(ScanResultFile{lines})
 }
 
-pub async fn load_result_file(file: &str) -> Result<HashSet<HashRelay>> { 
-    open_result_file(file).await?
+pub async fn load_result_filepath(file: impl AsRef<Path>) -> Result<HashSet<HashRelay>> { 
+    open_result_filepath(file).await?
     .read_all_to_hash_set().await
 }
 
@@ -57,7 +59,7 @@ impl ScanResultFile {
     }
 }
 
-pub async fn write_relays_to_file<'a, I>(relays: I, file_path: impl AsRef<Path>) -> Result<()>
+pub async fn write_relays_to_filepath<'a, I>(relays: I, file_path: impl AsRef<Path>) -> Result<()>
 where 
     I: Iterator<Item = &'a RelayInfo>,
 {
@@ -74,8 +76,8 @@ where
     // }
     // Ok(())
 
-    let mut file = do_open_file(file_path).await?;
-    do_write_relays_to_file(relays, &mut file).await
+    let mut file = util::create_file(file_path).await?;
+    write_to_file(relays, &mut file).await
 }
 
 
@@ -102,60 +104,61 @@ where
     Ok(())
 }
 
-pub async fn scan_relays_min_to_file<I>(
-    relays: I, 
-    timeout: Duration, 
-    concurrency: usize, 
-    min_active: usize, 
-    file: &str
-) -> Result<HashSet<HashRelay>>
-where 
-    I: Iterator<Item = RelayInfo>,
-{
+// pub async fn scan_relays_min_to_file<I>(
+//     relays: I, 
+//     timeout: Duration, 
+//     concurrency: usize, 
+//     min_active: usize, 
+//     file: &str
+// ) -> Result<HashSet<HashRelay>>
+// where 
+//     I: Iterator<Item = RelayInfo>,
+// {
 
-    struct Ctx {
-        set: HashSet<HashRelay>,
-        min_active: usize,
-        file: File,
-    }
-    let mut ctx = Ctx {
-        set: HashSet::new(),
-        min_active,
-        file: do_open_file(file).await?,
-    };
+//     struct Ctx {
+//         set: HashSet<HashRelay>,
+//         min_active: usize,
+//         file: File,
+//     }
+//     let mut ctx = Ctx {
+//         set: HashSet::new(),
+//         min_active,
+//         file: do_open_file(file).await?,
+//     };
 
-    async fn insert_to_set(ctx: &mut Ctx, (relay, r): ScanResult) -> Result<()> {
-        if r.is_ok() {
-            dbgi!("insert reachable [{:?}]", relay);
-            ctx.set.insert(HashRelay(relay));
-            if ctx.set.len() == ctx.min_active {
-                let relays = ctx.set.iter().map(|v|&v.0);
-                do_write_relays_to_file(relays, &mut ctx.file).await?;
-                dbgi!("wrote min relays [{}]", ctx.min_active);
-            }
-        }
-        Ok(())
-    }
+//     async fn insert_to_set(ctx: &mut Ctx, (relay, r): ScanResult) -> Result<()> {
+//         if r.is_ok() {
+//             dbgi!("insert reachable [{:?}]", relay);
+//             ctx.set.insert(HashRelay(relay));
+//             if ctx.set.len() == ctx.min_active {
+//                 let relays = ctx.set.iter().map(|v|&v.0);
+//                 do_write_relays_to_file(relays, &mut ctx.file).await?;
+//                 dbgi!("wrote min relays [{}]", ctx.min_active);
+//             }
+//         }
+//         Ok(())
+//     }
 
-    scan_relays(relays, timeout, concurrency, &mut ctx, &insert_to_set ).await?;
+//     scan_relays(relays, timeout, concurrency, &mut ctx, &insert_to_set ).await?;
 
-    let relays = ctx.set.iter().map(|v|&v.0);
-    do_write_relays_to_file(relays, &mut ctx.file).await?;
+//     let relays = ctx.set.iter().map(|v|&v.0);
+//     do_write_relays_to_file(relays, &mut ctx.file).await?;
 
-    Ok(ctx.set)
-}
+//     Ok(ctx.set)
+// }
 
-async fn do_open_file(file_path: impl AsRef<Path>) -> Result<File>
-{
-    if let Some(dir) = file_path.as_ref().parent() { 
-        fs::create_dir_all(dir).await? ;
-    }
+
+// pub async fn create_file(file_path: impl AsRef<Path>) -> Result<File>
+// {
+//     if let Some(dir) = file_path.as_ref().parent() { 
+//         fs::create_dir_all(dir).await? ;
+//     }
     
-    let file = File::create(file_path).await?;
-    Ok(file)
-}
+//     let file = File::create(file_path).await?;
+//     Ok(file)
+// }
 
-async fn do_write_relays_to_file<'a, I>(mut relays: I, file: &mut File) -> Result<()>
+pub async fn write_to_file<'a, I>(mut relays: I, file: &mut File) -> Result<()>
 where 
     I: Iterator<Item = &'a RelayInfo>,
 {

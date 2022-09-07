@@ -50,7 +50,7 @@ where
     let mut last_relay = relays.next().map(|v|v.into());
     let mut num_sent = 0;
 
-    let mut kick_log = IntervalLog::new(3, |ctx| {
+    let mut kick_log = IntervalLog::new(3000, |ctx| {
         dbgi!("kick scannings {}", *ctx);
     });
 
@@ -66,9 +66,7 @@ where
     dbgi!("kicked all scannings {}", num_sent);
 
     scanner.recv_until_closed(ctx, func).await?;
-    dbgi!("scanner closed");
-
-
+    dbgi!("scan done");
 
     Ok(())
 }

@@ -1,7 +1,8 @@
 
-use std::{pin::Pin, task::{Context, Poll}, marker::PhantomData, time::{Duration, Instant}};
+use std::{pin::Pin, task::{Context, Poll}, marker::PhantomData, time::{Duration, Instant}, path::Path};
 use std::future::Future;
 use anyhow::Result;
+use tokio::fs::File;
 
 
 
@@ -88,3 +89,13 @@ where
     }
 }
 
+
+pub async fn create_file(file_path: impl AsRef<Path>) -> Result<File>
+{
+    if let Some(dir) = file_path.as_ref().parent() { 
+        tokio::fs::create_dir_all(dir).await? ;
+    }
+    
+    let file = File::create(file_path).await?;
+    Ok(file)
+}

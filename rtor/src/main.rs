@@ -28,31 +28,27 @@ async fn old_main() -> Result<()> {
 
 // #![feature(unsafe_pin_internals)]
 
-use std::{str::FromStr, sync::Arc, time::Duration, collections::HashSet, convert::TryInto};
-
-use anyhow::{Result, Context, bail};
-use arti_client::{config::TorClientConfigBuilder, TorClient, StreamPrefs, TorClientConfig, IntoTorAddr, DangerouslyIntoTorAddr};
+use std::{str::FromStr, sync::Arc, time::Duration};
+use anyhow::{Result, Context};
+use arti_client::{config::{TorClientConfigBuilder}, TorClient, StreamPrefs, TorClientConfig, IntoTorAddr};
 use box_socks::SocksPrefRuntime;
 use futures::{AsyncWriteExt, AsyncReadExt};
-use scan::HashRelay;
-use socks5_proto::{HandshakeRequest, HandshakeMethod, HandshakeResponse, Request, Response, Reply, Address, Command};
 use strum::EnumString;
-use tokio::{
-    net::{TcpListener, TcpStream}, 
-    // io::AsyncWriteExt as TokioAsyncWriteExt
-};
+
+
 use tor_netdir::NetDir;
 use tor_rtcompat::Runtime;
 use tracing_subscriber::EnvFilter;
 
-use crate::scan::BuilInRelays;
+use crate::proxy::run_proxy;
 
 
 pub mod box_socks;
 pub mod box_tcp;
 pub mod util;
 pub mod scan;
-pub mod socks5;
+// pub mod socks5;
+pub mod proxy;
 
 /*
 
@@ -105,8 +101,16 @@ enum Cmd {
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 // #[tokio::main]
 async fn main() -> Result<()> {
+    // const FILTER: &str = "info,rtor=info,tor_netdir::hack_netdir=debug";
+    const FILTER: &str = "info"; 
+
+    let env_filter = match std::env::var_os(EnvFilter::DEFAULT_ENV) {
+        Some(_v) => EnvFilter::from_default_env(),
+        None => EnvFilter::from_str(FILTER)?,
+    };
+
     tracing_subscriber::fmt()
-    .with_env_filter(EnvFilter::from_default_env())
+    .with_env_filter(env_filter)
     .init();
     
     // let cmd = Cmd::from_str("Simple")?;
@@ -122,250 +126,7 @@ async fn main() -> Result<()> {
     r
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct Args {
-    storage_dir: Option<String>,
-    config_dir: Option<String>,
-    bootstrap_file: Option<String>,
-    bootstrap_buildin: bool,
-    socks_listen: Option<String>,
-    scan_timeout_secs: Option<u64>,
-    scan_concurrency: Option<usize>,
-}
 
-impl Args {
-    pub fn storage_dir(&self) -> &str {
-        self.storage_dir.as_deref().unwrap_or_else(||"~/.rtor-proxy/storage")
-    }
-
-    pub fn config_dir(&self) -> &str {
-        self.config_dir.as_deref().unwrap_or_else(||"~/.rtor-proxy/config")
-    }
-
-    pub fn state_dir(&self) -> String {
-        format!("{}/state", self.storage_dir())
-    }
-
-    pub fn cache_dir(&self) -> String {
-        format!("{}/cache", self.storage_dir())
-    }
-
-    pub fn work_relays_file(&self) -> String {
-        format!("{}/rtor/work_relays.txt", self.storage_dir())
-    }
-
-    pub fn socks_listen(&self) -> &str {
-        self.socks_listen.as_deref().unwrap_or_else(||"127.0.0.1:9150")
-    }
-
-    pub fn scan_timeout(&self) -> Duration { 
-        let secs = self.scan_timeout_secs.unwrap_or_else(||3);
-        Duration::from_secs(secs)
-    }
-
-    pub fn scan_concurrency(&self) -> usize { 
-        self.scan_concurrency.unwrap_or_else(||50)
-    }
-}
-
-async fn run_proxy() -> Result<()> {  
-    let args = Args::default();
-    
-    let work_relays_file = args.work_relays_file();
-    let mut is_scan_bootstraps = true;
-    // let mut guards_ids = None;
-
-    let config = {    
-
-        let relays = if let Some(bootstrap_relays_file) = &args.bootstrap_file {
-            dbgd!("scan bootstraps by [From [{}]]", bootstrap_relays_file);
-            scan_bootstraps(&args, Some(bootstrap_relays_file), &work_relays_file,).await?
-
-        } else if args.bootstrap_buildin {
-            dbgd!("scan bootstraps by [Force build-in]");
-            scan_bootstraps(&args, None, &work_relays_file).await?
-
-        } else if tokio::fs::metadata(&work_relays_file).await.is_err() {
-            dbgd!("scan bootstraps by [Not exist [{}]]", work_relays_file);
-            scan_bootstraps(&args, None, &work_relays_file).await?
-
-        } else {
-            let relays = scan::load_result_file(&work_relays_file).await
-            .with_context(||format!("fail to load bootstrap file [{}]", work_relays_file))?;
-            dbgd!("loaded relays [{}] from [{}]", relays.len(), work_relays_file);
-
-            {
-                let ids: Vec<_> = relays.iter().filter(|v|v.0.is_flagged_guard()).map(|v|v.0.id.clone()).collect();
-                if ids.len() > 0 { 
-                    dbgd!("set active guards {}", ids.len());
-                    *tor_netdir::hack_netdir::hack().data().guards_mut() = Some(ids.into());
-                    // guards_ids = Some(ids);
-                }
-            }
-
-            if relays.len() > 0 {
-                is_scan_bootstraps = false;
-                relays
-            } else { 
-                dbgd!("scan bootstraps by [Empty [{}]]", work_relays_file);
-                scan_bootstraps( &args, None, &work_relays_file, ).await?
-            }
-        };
-
-        if relays.len() == 0 {
-            bail!("empty bootstrap relays")
-        }
-
-        let caches = relays.iter().map(|v|(&v.0).into()).collect();
-
-        let mut builder = TorClientConfigBuilder::from_directories(
-            args.state_dir(), 
-            args.cache_dir()
-        );
-        builder.tor_network().set_fallback_caches(caches);
-        builder.build()?
-    };
-
-    let builder = TorClient::builder()
-    .config(config);
-
-    let tor_client = builder.create_bootstrapped().await?;
-    let netdir = tor_client.dirmgr().timely_netdir().with_context(||"no timely netdir")?;
-    dbgd!("bootstrapped ok");
-
-    if is_scan_bootstraps {
-        dbgd!("scanning active guards...");
-
-        let relays = netdir.relays().filter_map(|v|v.try_into().ok());
-        
-        let active_relays = scan::scan_relays_min_to_file(relays, args.scan_timeout(), args.scan_concurrency(), 10, &work_relays_file).await?;
-
-        let ids: Vec<_> = active_relays.into_iter()
-        .filter(|v|v.0.is_flagged_guard())
-        .map(|v|v.0.id)
-        .collect();
-        
-        dbgd!("bootstrapped active guards {}", ids.len());
-        if ids.len() > 0 { 
-            dbgd!("set active guards {}", ids.len());
-            *tor_netdir::hack_netdir::hack().data().guards_mut() = Some(ids.into());
-            // guards_ids = Some(ids);
-        }
-        
-    } else {
-        dbgd!("bootstrapped ok, relays {}", netdir.relays().count());
-    }
-
-    // match guards_ids {
-    //     Some(ids) => {
-    //         if ids.len() == 0 {
-    //             bail!("no active guards")
-    //         }
-    //         dbgd!("set active guards {}", ids.len());
-    //         *tor_netdir::hack_netdir::hack().data().guards_mut() = Some(ids.into());
-    //     },
-    //     None => bail!("no active guards"),
-    // }
-    
-
-    // simple_http_get(&tor_client, ("example.com", 80)).await?;
-    run_socks5_bridge(&args, &tor_client).await?;
-    
-    Ok(())
-}
-
-async fn run_socks5_bridge<R>(args: &Args, tor_client: &TorClient<R>) -> Result<()> 
-where
-    R: Runtime,
-{
-    let listener = TcpListener::bind(args.socks_listen()).await
-        .with_context(||format!("fail to listen at [{}]", args.socks_listen()))?;
-    dbgd!("socks5 listening at [{}]", args.socks_listen());
-
-    loop {
-        let (mut socket, addr) = listener.accept().await?;
-        dbgd!("socks5 client connected from [{}]", addr);
-
-        let tor_client0 = tor_client.clone();
-        tokio::spawn(async move {
-            let r = conn_task(&mut socket, &tor_client0).await;
-            dbgd!("conn finished with [{:?}]", r);
-        });
-    }
-    
-}
-
-async fn conn_task<R>(src: &mut TcpStream, tor_client: &TorClient<R>) -> Result<()> 
-where
-    R: Runtime,
-{ 
-    use tokio::io::AsyncWriteExt;
-    
-    let hs_req = HandshakeRequest::read_from(src).await?;
-
-    if hs_req.methods.contains(&HandshakeMethod::None) {
-        let hs_resp = HandshakeResponse::new(HandshakeMethod::None);
-        hs_resp.write_to(src).await?;
-    } else {
-        let hs_resp = HandshakeResponse::new(HandshakeMethod::Unacceptable);
-        hs_resp.write_to(src).await?;
-        let _ = src.shutdown().await;
-        bail!("unsupported client methods [{:?}]", hs_req.methods);
-    }
-
-    let req = {
-        let r = Request::read_from(src).await;
-        match r {
-            Ok(req) => req,
-            Err(err) => {
-                let resp = Response::new(Reply::GeneralFailure, Address::unspecified());
-                resp.write_to(src).await?;
-                let _ = src.shutdown().await;
-                return Err(err.into());
-            }
-        }
-    };
-
-
-    match &req.command {
-        Command::Connect => {},
-        _ => {
-            let resp = Response::new(Reply::CommandNotSupported, Address::unspecified());
-            resp.write_to(src).await?;
-            let _ = src.shutdown().await;
-            bail!("unsupported client commnad [{:?}]", req.command);
-        }
-    }
-
-    dbgd!("aaaaa connecting to target [{:?}]", req.address);
-    let r = match &req.address {
-        Address::SocketAddress(addr) => tor_client.connect_with_prefs(addr.into_tor_addr_dangerously()?, StreamPrefs::new().ipv4_only()).await,
-        Address::DomainAddress(host, port) => tor_client.connect_with_prefs((host.as_str(), *port), StreamPrefs::new().ipv4_only()).await,
-    };
-
-    dbgd!("aaaaa connecting is ok [{:?}]", r.is_ok());
-
-    let mut dst = match r {
-        Ok(dst) => dst,
-        Err(e) => {
-            let resp = Response::new(Reply::HostUnreachable, Address::unspecified());
-            resp.write_to(src).await?;
-            let _ = src.shutdown().await;
-            bail!("fail to connect target [{:?}] error [{:?}]", req.address, e);
-        },
-    };
-
-    dbgd!("aaaaa connected to target [{:?}]", req.address);
-
-    {
-        let resp = Response::new(Reply::Succeeded, Address::unspecified());
-        resp.write_to(src).await?;
-    }
-    
-    tokio::io::copy_bidirectional(&mut dst, src).await?;
-
-    Ok(())
-}
 
 // async fn run_socks5_bridge0<R>(args: &Args, tor_client: &TorClient<R>) -> Result<()> 
 // where
@@ -415,55 +176,7 @@ where
 
 
 
-async fn scan_bootstraps(
-    args: &Args,
-    bootstrap_relays_file: Option<&str>,
-    _work_relays_file: &str,
-) -> Result<HashSet<HashRelay>> {
 
-    let bootstrap_relays = if let Some(bootstrap_relays_file) = bootstrap_relays_file {
-        let r = scan::load_result_file(bootstrap_relays_file).await;
-        match r {
-            Ok(relays) => { 
-                dbgd!("loaded bootstrap relays [{}] from [{}]", relays.len(), bootstrap_relays_file);
-                if relays.len() > 0 {
-                    Some(relays)
-                } else {
-                    None
-                }
-            },
-            Err(_e) => { 
-                dbgd!("fail to load bootstrap relays from [{}]", bootstrap_relays_file);
-                None
-            },
-        }
-    } else {
-        None
-    };
-
-
-    let timeout = args.scan_timeout();
-    let concurrency = args.scan_concurrency();
-
-    let mut active_relays = HashSet::new();
-    if let Some(relays) = bootstrap_relays {
-        let relays = relays.into_iter().map(|v|v.0);
-        scan::scan_relays_to_set(relays, timeout, concurrency, &mut active_relays).await?;
-    } else {
-        let fallbacks = BuilInRelays::default();
-        dbgd!("use build-in bootstrap relays [{}]", fallbacks.len());
-        scan::scan_relays_to_set(fallbacks.relays_iter(), timeout, concurrency, &mut active_relays).await?;
-    }
-
-    // {
-    //     let file_path = &work_relays_file;
-    //     scan::write_relays_to_file(active_relays.iter().map(|v|&v.0), file_path).await
-    //     .with_context(||format!("fail to write file [{}]", file_path))?;
-    //     dbgd!("wrote active bootstrap relays [{}] to [{}]", active_relays.len(), file_path);
-    // }
-
-    Ok(active_relays)
-}
 
 
 async fn manual_download_dir() -> Result<()> { 
