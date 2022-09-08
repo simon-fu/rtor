@@ -7,13 +7,19 @@ use rand::rngs::ThreadRng;
 use tor_guardmgr::fallback::{FallbackList, FallbackDir};
 use tor_rtcompat::Runtime;
 
-use crate::util::{IntervalLog, AsyncHandler};
+use crate::{util::{IntervalLog, AsyncHandler}, scan::tcp_scan::Progress};
 use super::{tcp_scan::TcpScanner, RelayInfo, HashRelay};
 
 
 macro_rules! dbgi {
     ($($arg:tt)* ) => (
         tracing::info!($($arg)*) // comment out this line to disable log
+    );
+}
+
+macro_rules! dbgd {
+    ($($arg:tt)* ) => (
+        tracing::debug!($($arg)*) // comment out this line to disable log
     );
 }
 
@@ -29,7 +35,7 @@ where
 {
     async fn insert_to_set(output: &mut HashSet<HashRelay>, (relay, r): ScanResult) -> Result<()> {
         if r.is_ok() {
-            dbgi!("insert reachable [{:?}]", relay);
+            dbgd!("insert reachable [{:?}]", relay);
             output.insert(HashRelay(relay));
         }
         Ok(())
@@ -39,34 +45,37 @@ where
 }
 
 
+
 pub async fn scan_relays<I, C, F>(mut relays: I, timeout: Duration, concurrency: usize, ctx: &mut C, func: &F) -> Result<()>
 where
     I: Iterator<Item = RelayInfo>,
     F: for<'local> AsyncHandler<'local, C, ScanResult>
 {
 
-    let scanner = TcpScanner::new(timeout, concurrency);
+    let mut scanner = TcpScanner::new(timeout, concurrency);
 
     let mut last_relay = relays.next().map(|v|v.into());
-    let mut num_sent = 0;
 
-    let mut kick_log = IntervalLog::new(3000, |ctx| {
-        dbgi!("kick scannings {}", *ctx);
-    });
+
+    fn print(progress: &Progress) {
+        dbgi!("scannings progress [{}/{}]", progress.num_recv, progress.num_sent);
+    }
+
+    // progress log
+    let mut plog = IntervalLog::new(10_000, print);
 
     while last_relay.is_some() {
-        // num_sent += try_send_until_full(&mut relays, &scanner, &mut last_relay)?;
-        num_sent += scanner.try_send_until_full(&mut relays, &mut last_relay)?;
-        kick_log.update(&num_sent);
+        scanner.try_send_until_full(&mut relays, &mut last_relay)?;
+        plog.update(scanner.progress());
         
-        // recv_until_empty(&rr, ctx, func).await?;
         scanner.recv_until_empty(ctx, func).await?;
     }
-    kick_log.finish(&num_sent);
-    dbgi!("kicked all scannings {}", num_sent);
+    plog.finish(scanner.progress());
+    dbgi!("kicked all scannings [{}]", scanner.progress().num_sent);
 
     scanner.recv_until_closed(ctx, func).await?;
-    dbgi!("scan done");
+    let progress = scanner.progress();
+    dbgi!("scan done [{}/{}]", progress.num_recv, progress.num_sent);
 
     Ok(())
 }
@@ -79,7 +88,7 @@ where
     {
         let frac = tor_client.bootstrap_status().as_frac();
         if frac > 0.0 {
-            dbgi!("bootstrap frac {}, ignore scan fallbacks", frac);
+            dbgd!("bootstrap frac {}, ignore scan fallbacks", frac);
             return Ok(None)
         }
     }
@@ -142,7 +151,6 @@ pub async fn scan_fallbacks(fallbacks: &FallbackList) -> Result<HashSet<HashRela
 
     dbgi!("start scan fallbacks {}", fallbacks.len());
 
-    
 
     let rng = rand::thread_rng();
     let iter = FallbackIter {
@@ -154,7 +162,7 @@ pub async fn scan_fallbacks(fallbacks: &FallbackList) -> Result<HashSet<HashRela
 
     async fn insert_to_set(output: &mut HashSet<HashRelay>, (relay, r): ScanResult) -> Result<()> {
         if r.is_ok() {
-            dbgi!("insert fallback [{:?}]", relay);
+            dbgd!("insert fallback [{:?}]", relay);
             output.insert(HashRelay(relay));
         }
         Ok(())

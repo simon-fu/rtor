@@ -3,22 +3,23 @@ use std::path::PathBuf;
 
 use anyhow::{Result, Context, bail};
 use arti_client::{config::{TorClientConfigBuilder, CfgPath}, TorClient, StreamPrefs, DangerouslyIntoTorAddr};
+use tracing::{debug, info};
 use crate::scan::{self, HashRelay};
 
 use socks5_proto::{HandshakeRequest, HandshakeMethod, HandshakeResponse, Request, Response, Reply, Address, Command};
-use tokio::net::{TcpListener, TcpStream};
-use tor_netdir::NetDir;
+use tokio::{net::{TcpListener, TcpStream}, sync::oneshot};
+use tor_netdir::{NetDir, hack_netdir};
 use tor_rtcompat::Runtime;
 
 
 use crate::scan::{BuilInRelays, ScanResult};
 
 
-macro_rules! dbgd {
-    ($($arg:tt)* ) => (
-        tracing::info!($($arg)*) // comment out this line to disable log
-    );
-}
+// macro_rules! dbgd {
+//     ($($arg:tt)* ) => (
+//         tracing::info!($($arg)*) // comment out this line to disable log
+//     );
+// }
 
 
 #[derive(Debug, Clone, Default)]
@@ -82,7 +83,7 @@ impl Args {
     }
 
     pub fn scan_interval(&self) -> Duration {
-        let secs = self.scan_interval_secs.unwrap_or_else(|| 60*10);
+        let secs = self.scan_interval_secs.unwrap_or_else(|| 60*60*24);
         Duration::from_secs(secs)
     }
 }
@@ -135,7 +136,7 @@ pub async fn run_proxy() -> Result<()> {
     
 
     {
-        *tor_netdir::hack_netdir::hack().data().planb_guards_mut() = Some(Vec::with_capacity(1));
+        *hack_netdir::hack().data().planb_guards_mut() = Some(Vec::with_capacity(1));
     }
     
     let mut first_active_guards = 0;
@@ -143,15 +144,15 @@ pub async fn run_proxy() -> Result<()> {
     let config = {    
 
         let relays = if let Some(bootstrap_relays_file) = &args.bootstrap_file {
-            dbgd!("scan bootstraps by [From [{}]]", bootstrap_relays_file);
+            info!("scan bootstraps by [From [{}]]", bootstrap_relays_file);
             scan_bootstraps(&args, Some(bootstrap_relays_file),).await?
 
         } else if args.bootstrap_buildin {
-            dbgd!("scan bootstraps by [Force build-in]");
+            info!("scan bootstraps by [Force build-in]");
             scan_bootstraps(&args, None).await?
 
         } else if tokio::fs::metadata(&args.work_relays_file).await.is_err() {
-            dbgd!("scan bootstraps by [Not exist [{:?}]]", args.work_relays_file);
+            info!("scan bootstraps by [Not exist [{:?}]]", args.work_relays_file);
             scan_bootstraps(&args, None).await?
 
         } else {
@@ -159,7 +160,7 @@ pub async fn run_proxy() -> Result<()> {
             let file = &args.work_relays_file;
             let set = scan::load_result_filepath(file).await
             .with_context(||format!("fail to load bootstrap file [{:?}]", file))?;
-            dbgd!("loaded relays [{}] from [{:?}]", set.len(), file);
+            info!("loaded relays [{}] from [{:?}]", set.len(), file);
 
             first_active_guards = set_active_guards("load relays", &set);
 
@@ -167,7 +168,7 @@ pub async fn run_proxy() -> Result<()> {
                 // is_scan_bootstraps = false;
                 set
             } else { 
-                dbgd!("scan bootstraps by [Empty [{:?}]]", args.work_relays_file);
+                info!("scan bootstraps by [Empty [{:?}]]", args.work_relays_file);
                 scan_bootstraps( &args, None).await?
             }
         };
@@ -189,50 +190,35 @@ pub async fn run_proxy() -> Result<()> {
     let builder = TorClient::builder()
     .config(config);
 
+    info!("bootstrapping...");
     let tor_client = builder.create_bootstrapped().await?;
-    dbgd!("bootstrapped ok");
+    info!("bootstrapped ok");
 
-    // let netdir = tor_client.dirmgr().timely_netdir().with_context(||"no timely netdir")?;
-    // dbgd!("bootstrapped ok, relays {}", netdir.relays().count());
 
     {
+        let (tx, rx) = oneshot::channel();
         let tor_client = tor_client.clone();
         let args = args.clone();
-        let mut scanner = RelayScanner::new(tor_client, args, first_active_guards);
+        let mut scanner = RelayScanner::new(tor_client, args, first_active_guards, Some(tx));
+        
         tokio::spawn(async move {
             loop {
                 let r = scanner.scan_and_set_relays().await; 
-                dbgd!("scan result: [{:?}]", r);
+                info!("scan result: [{:?}]", r);
                 scanner.wait_for_next().await
             }
         });
+
+        let no_guards = {
+            hack_netdir::hack().data().guards_mut().is_none()
+        };
+
+        if no_guards {
+            let _r = rx.await;
+        }
     }
 
-    // if is_scan_bootstraps {
-    //     dbgd!("scanning active guards...");
 
-    //     let relays = netdir.relays().filter_map(|v|v.try_into().ok());
-        
-    //     let active_relays = scan::scan_relays_min_to_file(relays, args.scan_timeout(), args.scan_concurrency(), 10, &work_relays_file).await?;
-
-    //     let ids: Vec<_> = active_relays.into_iter()
-    //     .filter(|v|v.0.is_flagged_guard())
-    //     .map(|v|v.0.id)
-    //     .collect();
-        
-    //     dbgd!("bootstrapped active guards {}", ids.len());
-    //     if ids.len() > 0 { 
-    //         dbgd!("set active guards {}", ids.len());
-    //         *tor_netdir::hack_netdir::hack().data().guards_mut() = Some(ids.into());
-    //         // guards_ids = Some(ids);
-    //     }
-        
-    // } else {
-    //     dbgd!("bootstrapped ok, relays {}", netdir.relays().count());
-    // }
-
-
-    // simple_http_get(&tor_client, ("example.com", 80)).await?;
     run_socks5_bridge(&args, &tor_client).await?;
     
     Ok(())
@@ -243,29 +229,16 @@ pub struct RelayScanner<R:Runtime> {
     tor_client: TorClient<R>,
     args: Arc<ProxyConfig>,
     last_guards: usize,
+    tx: Option<oneshot::Sender<()>>,
 }
 
 impl<R> RelayScanner<R> 
 where
     R: Runtime,
 {
-    pub fn new(tor_client: TorClient<R>, args: Arc<ProxyConfig>, last_guards: usize) -> Self {
-        Self { tor_client, args, last_guards}
+    pub fn new(tor_client: TorClient<R>, args: Arc<ProxyConfig>, last_guards: usize, tx: Option<oneshot::Sender<()>>) -> Self {
+        Self { tor_client, args, last_guards, tx}
     }
-
-    // pub async fn load_and_set_relays(&mut self) -> Result<HashSet<HashRelay>> {
-    //     let file = &self.args.work_relays_file;
-
-    //     let set = scan::load_result_filepath(file).await
-    //     .with_context(||format!("fail to load bootstrap file [{:?}]", file))?;
-    
-    //     {
-    //         // let ids: Vec<_> = set.iter().filter(|v|v.0.is_flagged_guard()).map(|v|v.0.id.clone()).collect();
-    //         // self.set_active_guards(ids);
-    //         let num = set_active_guards("load relays", set.iter().map(|v|&v.0));
-    //     }
-    //     Ok(set)
-    // }
 
     pub async fn wait_for_next(&self) {
         tokio::time::sleep(self.args.scan_interval).await;
@@ -274,7 +247,7 @@ where
     pub async fn scan_and_set_relays(&mut self) -> Result<()> {
         let netdir = self.tor_client.dirmgr().timely_netdir()?;
         
-        let set = scan_and_set_relays(netdir, self.args.clone(), self.last_guards).await?;
+        let set = scan_and_set_relays(netdir, self.args.clone(), self.last_guards, self.tx.take()).await?;
         
         // let ids: Vec<_> = set.iter().filter(|v|v.0.is_flagged_guard()).map(|v|v.0.id.clone()).collect();
 
@@ -290,7 +263,7 @@ where
 
 }
 
-pub async fn scan_and_set_relays(netdir: Arc<NetDir>, args: Arc<ProxyConfig>, last_guards: usize) -> Result<HashSet<HashRelay>> {
+pub async fn scan_and_set_relays(netdir: Arc<NetDir>, args: Arc<ProxyConfig>, last_guards: usize, tx: Option<oneshot::Sender<()>>) -> Result<HashSet<HashRelay>> {
     // let netdir = self.tor_client.dirmgr().timely_netdir()?;
     
     struct Ctx {
@@ -298,6 +271,7 @@ pub async fn scan_and_set_relays(netdir: Arc<NetDir>, args: Arc<ProxyConfig>, la
         last_guards: usize,
         args: Arc<ProxyConfig>,
         active_guards: usize,
+        tx: Option<oneshot::Sender<()>>,
     }
 
     let mut ctx = Ctx {
@@ -305,6 +279,7 @@ pub async fn scan_and_set_relays(netdir: Arc<NetDir>, args: Arc<ProxyConfig>, la
         last_guards,
         args,
         active_guards: 0,
+        tx,
     };
 
     async fn insert_to_set(ctx: &mut Ctx, (relay, r): ScanResult) -> Result<()> {
@@ -313,7 +288,7 @@ pub async fn scan_and_set_relays(netdir: Arc<NetDir>, args: Arc<ProxyConfig>, la
             if is_flagged_guard {
                 ctx.active_guards += 1;
             }
-            dbgd!("insert relay [{:?}], guards [{}/{}]", relay, ctx.active_guards, ctx.set.len()+1);
+            debug!("insert relay [{:?}], guards [{}/{}]", relay, ctx.active_guards, ctx.set.len()+1);
             ctx.set.insert(HashRelay(relay));
 
             if is_flagged_guard && ctx.active_guards > ctx.last_guards { 
@@ -327,6 +302,9 @@ pub async fn scan_and_set_relays(netdir: Arc<NetDir>, args: Arc<ProxyConfig>, la
                     // let ids: Vec<_> = ctx.set.iter().filter(|v|v.0.is_flagged_guard()).map(|v|v.0.id.clone()).collect();
                     set_active_guards("scan in-progress", &ctx.set);
                     scan::write_relays_to_filepath(ctx.set.iter().map(|v|&v.0), &ctx.args.work_relays_file).await?;
+                    if let Some(tx) = ctx.tx.take() {
+                        let _r = tx.send(());
+                    }
                     // ctx.last_guards = ctx.active_guards;
                 }
             }
@@ -334,35 +312,16 @@ pub async fn scan_and_set_relays(netdir: Arc<NetDir>, args: Arc<ProxyConfig>, la
         Ok(())
     }
 
+    let total = netdir.relays().count();
+    info!("scanning relays [{}]...", total);
     let relays = netdir.relays().filter_map(|v|v.try_into().ok());
     scan::scan_relays(relays, ctx.args.scan_timeout, ctx.args.scan_concurrency, &mut ctx, &insert_to_set).await?;
+    info!("scanning result [{}/{}]...", ctx.set.len(), total);
 
     Ok(ctx.set)
 }
 
-// async fn load_and_set_relays(file: impl AsRef<Path>) -> Result<HashSet<HashRelay>> {
-//     let set = scan::load_result_filepath(&file).await
-//     .with_context(||format!("fail to load bootstrap file [{:?}]", file.as_ref()))?;
 
-//     {
-//         // let ids: Vec<_> = set.iter().filter(|v|v.0.is_flagged_guard()).map(|v|v.0.id.clone()).collect();
-//         set_active_guards("load relays", &set );
-//     }
-//     Ok(set)
-// }
-
-// pub async fn scan_relays<I, C, F>(mut relays: I, timeout: Duration, concurrency: usize, ctx: &mut C, func: &F) -> Result<()>
-// where
-//     I: Iterator<Item = RelayInfo>,
-//     F: for<'local> AsyncHandler<'local, C, ScanResult>
-// {
-
-// }
-// fn set_active_guards(prefix: &str, ids: Vec<Ed25519Identity>) -> bool 
-
-// fn set_active_guards<'a, I>(prefix: &str, relays: I) -> usize 
-// where
-//     I: Iterator<Item = &'a RelayInfo>,
 fn set_active_guards(prefix: &str, set: &HashSet<HashRelay>) -> usize 
 {
     let ids: Vec<_> = set.iter()
@@ -372,8 +331,8 @@ fn set_active_guards(prefix: &str, set: &HashSet<HashRelay>) -> usize
 
     let num = ids.len();
     if ids.len() > 0 {
-        dbgd!("{}: set active guards {}", prefix, ids.len());
-        *tor_netdir::hack_netdir::hack().data().guards_mut() = Some(ids.into());
+        info!("{}: set active guards {}", prefix, ids.len());
+        *hack_netdir::hack().data().guards_mut() = Some(ids.into());
     }
     num
 }
@@ -386,16 +345,16 @@ where
 {
     let listener = TcpListener::bind(args.socks_listen.as_str()).await
         .with_context(||format!("fail to listen at [{}]", args.socks_listen))?;
-    dbgd!("socks5 listening at [{}]", args.socks_listen);
+    info!("socks5 listening at [{}]", args.socks_listen);
 
     loop {
         let (mut socket, addr) = listener.accept().await?;
-        dbgd!("socks5 client connected from [{}]", addr);
+        debug!("socks5 client connected from [{}]", addr);
 
         let tor_client0 = tor_client.clone();
         tokio::spawn(async move {
             let r = conn_task(&mut socket, &tor_client0).await;
-            dbgd!("conn finished with [{:?}]", r);
+            debug!("conn finished with [{:?}]", r);
         });
     }
     
@@ -443,13 +402,13 @@ where
         }
     }
 
-    dbgd!("connecting to target [{:?}]", req.address);
+    debug!("connecting to target [{:?}]", req.address);
     let r = match &req.address {
         Address::SocketAddress(addr) => tor_client.connect_with_prefs(addr.into_tor_addr_dangerously()?, StreamPrefs::new().ipv4_only()).await,
         Address::DomainAddress(host, port) => tor_client.connect_with_prefs((host.as_str(), *port), StreamPrefs::new().ipv4_only()).await,
     };
 
-    dbgd!("connecting is ok [{:?}]", r.is_ok());
+    debug!("connecting is ok [{:?}]", r.is_ok());
 
     let mut dst = match r {
         Ok(dst) => dst,
@@ -461,7 +420,7 @@ where
         },
     };
 
-    dbgd!("connected to target [{:?}]", req.address);
+    debug!("connected to target [{:?}]", req.address);
 
     {
         let resp = Response::new(Reply::Succeeded, Address::unspecified());
@@ -482,7 +441,7 @@ async fn scan_bootstraps(
         let r = scan::load_result_filepath(bootstrap_relays_file).await;
         match r {
             Ok(relays) => { 
-                dbgd!("loaded bootstrap relays [{}] from [{}]", relays.len(), bootstrap_relays_file);
+                info!("loaded bootstrap relays [{}] from [{}]", relays.len(), bootstrap_relays_file);
                 if relays.len() > 0 {
                     Some(relays)
                 } else {
@@ -490,7 +449,7 @@ async fn scan_bootstraps(
                 }
             },
             Err(_e) => { 
-                dbgd!("fail to load bootstrap relays from [{}]", bootstrap_relays_file);
+                info!("fail to load bootstrap relays from [{}]", bootstrap_relays_file);
                 None
             },
         }
@@ -503,21 +462,19 @@ async fn scan_bootstraps(
     let concurrency = args.scan_concurrency;
 
     let mut active_relays = HashSet::new();
-    if let Some(relays) = bootstrap_relays {
+    let total = if let Some(relays) = bootstrap_relays {
+        let total = relays.len();
+        info!("scanning custom bootstrap relays [{}]...", total);
         let relays = relays.into_iter().map(|v|v.0);
         scan::scan_relays_to_set(relays, timeout, concurrency, &mut active_relays).await?;
+        total
     } else {
         let fallbacks = BuilInRelays::default();
-        dbgd!("use build-in bootstrap relays [{}]", fallbacks.len());
+        info!("scanning build-in bootstrap relays [{}]...", fallbacks.len());
         scan::scan_relays_to_set(fallbacks.relays_iter(), timeout, concurrency, &mut active_relays).await?;
-    }
-
-    // {
-    //     let file_path = &work_relays_file;
-    //     scan::write_relays_to_file(active_relays.iter().map(|v|&v.0), file_path).await
-    //     .with_context(||format!("fail to write file [{}]", file_path))?;
-    //     dbgd!("wrote active bootstrap relays [{}] to [{}]", active_relays.len(), file_path);
-    // }
+        fallbacks.len()
+    };
+    info!("scanning bootstrap relays result [{}/{}]", active_relays.len(), total);
 
     Ok(active_relays)
 }

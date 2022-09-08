@@ -5,9 +5,9 @@ use crate::util;
 
 use super::{RelayInfo, HashRelay, scan_relays, ScanResult};
 
-macro_rules! dbgi {
+macro_rules! dbgd {
     ($($arg:tt)* ) => (
-        tracing::info!($($arg)*) // comment out this line to disable log
+        tracing::debug!($($arg)*) // comment out this line to disable log
     );
 }
 
@@ -91,7 +91,7 @@ where
         if r.is_ok() {
             // let s = format!("{}\r\n", relay.id);
             let s = serde_json::to_string(&relay)?;
-            dbgi!("got reachable [{}]", s);
+            dbgd!("got reachable [{}]", s);
             file.write_all(s.as_bytes()).await?;
             file.write_all("\r\n".as_bytes()).await?;
         }

@@ -5,7 +5,7 @@ use tokio::{net::TcpStream, task::JoinHandle};
 use anyhow::{Result, bail};
 use tracing::Instrument;
 
-use crate::util::{AsyncHandler, recv_until_empty, try_send_until_full, recv_until_closed};
+use crate::util::{AsyncHandler, async_ch_util};
 
 macro_rules! dbgd {
     ($($arg:tt)* ) => (
@@ -28,10 +28,21 @@ macro_rules! dbgd {
 //     }
 // }
 
+
+/// Scan Result 
+type SResult<T> = (T, Result<()>);
+
+#[derive(Debug, Clone, Default)]
+pub struct Progress {
+    pub num_sent: usize,
+    pub num_recv: usize,
+}
+
 pub struct TcpScanner<T> {
     tasks: Vec<JoinHandle<Result<()>>>,
     tx: Option<async_channel::Sender<T>>,
-    rx: Option<async_channel::Receiver<(T, Result<()>)>>,
+    rx: Option<async_channel::Receiver<SResult<T>>>,
+    progress: Progress,
 }
 
 impl<T> TcpScanner<T> 
@@ -55,7 +66,11 @@ where
             tasks.push(task);
         }
 
-        Self { tasks, tx: Some(tx0), rx: Some(rx1) } 
+        Self { tasks, tx: Some(tx0), rx: Some(rx1), progress: Progress::default(), } 
+    }
+
+    pub fn progress(&self) -> &Progress {
+        &self.progress
     }
 
     // pub fn result_recver(&self) -> Result<ResultReceiver<T>> {
@@ -94,7 +109,7 @@ where
         }
     }
 
-    pub fn try_send_until_full<I>(&self, relays: &mut I, last: &mut Option<T>) -> Result<usize>
+    pub fn try_send_until_full<I>(&mut self, relays: &mut I, last: &mut Option<T>) -> Result<usize>
     where 
         I: Iterator<Item = T>
     {
@@ -103,13 +118,14 @@ where
             None => bail!("try_send_until_full but closed"),
         };
 
-        try_send_until_full(tx, relays, last)
-
+        let n = async_ch_util::try_send_until_full(tx, relays, last)?;
+        self.progress.num_sent += n;
+        Ok(n)
     }
 
-    pub async fn recv_until_empty<C, F>(&self, ctx: &mut C, func: &F) -> Result<()> 
+    pub async fn recv_until_empty<C, F>(&mut self, ctx: &mut C, func: &F) -> Result<usize> 
     where
-        F: for<'local> AsyncHandler<'local, C, (T, Result<()>)>
+        F: for<'local> AsyncHandler<'local, C, SResult<T>>
 
     { 
         let rx = match &self.rx {
@@ -117,12 +133,14 @@ where
             None => bail!("recv_until_empty but closed"),
         };
 
-        recv_until_empty(rx, ctx, func).await
+        let n = async_ch_util::recv_until_empty(rx, ctx, func).await?;
+        self.progress.num_recv += n;
+        Ok(n)
     }
 
-    pub async fn recv_until_closed<C, F>(mut self, ctx: &mut C, func: &F) -> Result<()> 
+    pub async fn recv_until_closed<C, F>(&mut self, ctx: &mut C, func: &F) -> Result<usize> 
     where
-        F: for<'local> AsyncHandler<'local, C, (T, Result<()>)>,
+        F: for<'local> AsyncHandler<'local, C, SResult<T>>,
     {
         self.close_send();
 
@@ -130,10 +148,10 @@ where
             Some(rx) => rx,
             None => bail!("recv_until_closed but closed"),
         };
-        recv_until_closed(rx, ctx, func).await?;
-
+        let num = async_ch_util::recv_until_closed(rx, ctx, func).await?;
+        self.progress.num_recv += num;
         self.wait_for_finished().await;
-        Ok(())
+        Ok(num)
     }
 
 
@@ -150,7 +168,7 @@ pub trait GetAddrs<'a> {
 
 
 async fn scan_task<T>(
-    tx: async_channel::Sender<(T, Result<()>)>, 
+    tx: async_channel::Sender<SResult<T>>, 
     rx: async_channel::Receiver<T>,
     timeout: Duration,
 ) -> Result<()> 

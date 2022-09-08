@@ -31,7 +31,8 @@ where
     Ok(num)
 }
 
-pub async fn recv_until_empty<C, F, R>(rx: &Receiver<R>, ctx: &mut C, func: &F) -> Result<()> 
+
+pub async fn recv_until_empty<C, F, R>(rx: &Receiver<R>, ctx: &mut C, func: &F) -> Result<usize> 
 where
     F: for<'local> AsyncHandler<'local, C, R>
 
@@ -39,24 +40,27 @@ where
     let r = rx.recv().await?;
     func.call(ctx, r).await?;
 
-    do_recv_until_empty(rx, ctx, func).await
+    let n = do_recv_until_empty(rx, ctx, func).await?;
+    Ok(n+1)
 }
 
-async fn do_recv_until_empty<C, F, R>(rx: &Receiver<R>, ctx: &mut C, func: &F) -> Result<()> 
+async fn do_recv_until_empty<C, F, R>(rx: &Receiver<R>, ctx: &mut C, func: &F) -> Result<usize> 
 where
     F: for<'local> AsyncHandler<'local, C, R>,
 { 
+    let mut num = 0;
     loop {
         let r = rx.try_recv();
         match r {
             Ok(r) => {
+                num += 1;
                 // write_relay_result(&r, file).await?;
                 func.call(ctx, r).await?;
 
             },
             Err(e) => {
                 match e {
-                    TryRecvError::Empty => return Ok(()),
+                    TryRecvError::Empty => return Ok(num),
                     TryRecvError::Closed => bail!("try recv until empty but closed"),
                 }
             },
@@ -64,25 +68,27 @@ where
     }
 }
 
-pub async fn recv_until_closed<C, F, R>(rx: &Receiver<R>, ctx: &mut C, func: &F) -> Result<()> 
+pub async fn recv_until_closed<C, F, R>(rx: &Receiver<R>, ctx: &mut C, func: &F) -> Result<usize> 
 where
     F: for<'local> AsyncHandler<'local, C, R>,
 { 
-
+    let mut num = 0;
     loop {
         let r = rx.try_recv();
         match r {
             Ok(r) => {
+                num += 1;
                 func.call(ctx, r).await?;
             },
             Err(e) => {
                 match e {
                     TryRecvError::Closed => {
-                        return Ok(())
+                        return Ok(num)
                     },
 
                     TryRecvError::Empty => {
-                        return do_recv_until_closed(rx, ctx, func).await
+                        num += do_recv_until_closed(rx, ctx, func).await?;
+                        return Ok(num)
                     },
    
                 }
@@ -91,18 +97,20 @@ where
     }
 }
 
-async fn do_recv_until_closed<C, F, R>(rx: &Receiver<R>, ctx: &mut C, func: &F) -> Result<()> 
+async fn do_recv_until_closed<C, F, R>(rx: &Receiver<R>, ctx: &mut C, func: &F) -> Result<usize> 
 where
     F: for<'local> AsyncHandler<'local, C, R>,
 {
+    let mut num = 0;
     loop {
         let r = rx.recv().await;
         match r {
             Ok(r) => {
+                num += 1;
                 func.call(ctx, r).await?;
             },
             Err(_e) => {
-                return Ok(())
+                return Ok(num)
             },
         }
     } 

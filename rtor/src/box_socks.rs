@@ -33,8 +33,12 @@ pub struct SocksArgs {
     /// TODO: add doc
     pub password: Option<String>,
 
-    /// TODO: add doc
-    pub max_targets: Option<usize>,
+    /// None： 所有连接都使用 socks
+    /// 
+    /// Some(0)： 禁止使用 socks
+    /// 
+    /// Some(n)： 允许n个连接使用 socks
+    pub max_targets: Option<usize>, 
 }
 
 /// TODO: add doc
