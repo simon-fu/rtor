@@ -1,0 +1,4 @@
+[submodule "submodules/arti"]
+	path = submodules/arti
+	url = https://github.com/simon-fu/arti.git
+	branch = simon-hack1

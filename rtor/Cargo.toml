@@ -40,13 +40,27 @@ socks5-proto = "0.3.2"
 # tor-llcrypto = { version = "0.3.3", features = [ ]}
 # tor-netdir = { version = "0.5.0", features = [ "experimental-api" ]}
 
-arti-client = { path="/Users/simon/simon/src/study/p2p-im/arti/crates/arti-client",  version = "0.5.0", features = [ "dirfilter", "experimental-api" ]}
-tor-rtcompat = { path="/Users/simon/simon/src/study/p2p-im/arti/crates/tor-rtcompat", version = "0.5.0", features = [ ]}
-tor-llcrypto = { path="/Users/simon/simon/src/study/p2p-im/arti/crates/tor-llcrypto", version = "0.3.3", features = [ ]}
-tor-netdir = { path="/Users/simon/simon/src/study/p2p-im/arti/crates/tor-netdir", version = "0.5.0", features = [ "experimental-api" ]}
-tor-netdoc = { path="/Users/simon/simon/src/study/p2p-im/arti/crates/tor-netdoc", version = "0.5.0", features = [ ]}
-tor-guardmgr = { path = "/Users/simon/simon/src/study/p2p-im/arti/crates/tor-guardmgr", version = "0.5.0" }
-tor-linkspec = { path = "/Users/simon/simon/src/study/p2p-im/arti/crates/tor-linkspec", version = "0.4.0" }
+arti-client = {  path = "../submodules/arti/crates/arti-client",  version = "0.5.0", features = [ "dirfilter", "experimental-api" ]}
+tor-rtcompat = { path = "../submodules/arti/crates/tor-rtcompat", version = "0.5.0", features = [ ]}
+tor-llcrypto = { path = "../submodules/arti/crates/tor-llcrypto", version = "0.3.3", features = [ ]}
+tor-netdir = {   path = "../submodules/arti/crates/tor-netdir", version = "0.5.0", features = [ "experimental-api" ]}
+tor-netdoc = {   path = "../submodules/arti/crates/tor-netdoc", version = "0.5.0", features = [ ]}
+tor-guardmgr = { path = "../submodules/arti/crates/tor-guardmgr", version = "0.5.0" }
+tor-linkspec = { path = "../submodules/arti/crates/tor-linkspec", version = "0.4.0" }
 
+# #  branch = "simon-hack1"
+# arti-client = { git = "https://github.com/simon-fu/arti.git", rev = "9e391009", version = "0.5.0", features = [ "dirfilter", "experimental-api" ] }
+
+# tor-rtcompat = { git = "https://github.com/simon-fu/arti.git", rev = "9e391009", version = "0.5.0", features = [ ] }
+
+# tor-llcrypto = { git = "https://github.com/simon-fu/arti.git", rev = "9e391009", version = "0.3.3", features = [ ] }
+
+# tor-netdir = { git = "https://github.com/simon-fu/arti.git", rev = "9e391009", version = "0.5.0", features = [ "experimental-api" ] }
+
+# tor-netdoc = { git = "https://github.com/simon-fu/arti.git", rev = "9e391009", version = "0.5.0", features = [ ] }
+
+# tor-guardmgr = { git = "https://github.com/simon-fu/arti.git", rev = "9e391009", version = "0.5.0", features = [ ] }
+
+# tor-linkspec = { git = "https://github.com/simon-fu/arti.git", rev = "9e391009", version = "0.4.0", features = [ ] }
 
 

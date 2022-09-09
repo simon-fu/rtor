@@ -5,28 +5,22 @@
 /// - TODO: 使用github 的 arti/simon-hack1，而不是本地目录
 /// - TODO: 支持命令行参数
 /// - TODO: 支持 socks4
-/// - TODO： 直接用 exit relay 做代理，
-///    使用 [client] -> [socks5 proxy] -> [exit] -> [target], 
-///    代替 [client] -> [socks5 proxy] -> [gurad] -> [middle] -> [exit] -> [target]
+/// - TODO: socks5-proto 改成 socks5-server
+/// - TODO: 直接用 exit relay 做代理，
+///     使用 [client] -> [socks5 proxy] -> [exit] -> [target], 
+///     代替 [client] -> [socks5 proxy] -> [gurad] -> [middle] -> [exit] -> [target]
+/// - TODO: 官方计划支持 bridge 和 socks 等 outbound proxy，
+///     详见：
+///     https://gitlab.torproject.org/tpo/core/arti/-/issues/69
+///     https://gitlab.torproject.org/tpo/core/arti/-/merge_requests/686
+///     https://gitlab.torproject.org/tpo/core/arti/-/milestones/10#tab-issues
 /// 
 
-/* 
 /// - issue
-///   dropping TorClient will stuck in tor_rtcompat::scheduler::TaskSchedule::sleep_until_wallclock() and burning cpu
+///     dropping TorClient will stuck in tor_rtcompat::scheduler::TaskSchedule::sleep_until_wallclock() and burning cpu
+///     已提交 https://gitlab.torproject.org/tpo/core/arti/-/issues/572
 
-/// readme.rs
-#[tokio::main]
-async fn main() -> Result<()> { 
-    old_main().await?;
-    println!("sleep forever");
-    tokio::time::sleep(std::time::Duration::from_secs(999999)).await; // burning cpu here
-    Ok(())
-}
 
-async fn old_main() -> Result<()> {
-    ...
-}
-*/
 
 
 
