@@ -40,7 +40,7 @@ socks5-proto = "0.3.2"
 # tor-llcrypto = { version = "0.3.3", features = [ ]}
 # tor-netdir = { version = "0.5.0", features = [ "experimental-api" ]}
 
-arti-client = {  path = "../submodules/arti/crates/arti-client",  version = "0.5.0", features = [ "dirfilter", "experimental-api" ]}
+arti-client = {  path = "../submodules/arti/crates/arti-client",  version = "0.5.0", features = [ "dirfilter", "experimental-api", "static" ]}
 tor-rtcompat = { path = "../submodules/arti/crates/tor-rtcompat", version = "0.5.0", features = [ ]}
 tor-llcrypto = { path = "../submodules/arti/crates/tor-llcrypto", version = "0.3.3", features = [ ]}
 tor-netdir = {   path = "../submodules/arti/crates/tor-netdir", version = "0.5.0", features = [ "experimental-api" ]}
