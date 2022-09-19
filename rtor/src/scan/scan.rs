@@ -1,6 +1,6 @@
 
 
-use std::{time::Duration, collections::HashSet};
+use std::{time::Duration, collections::HashSet, sync::Arc};
 use anyhow::{Result, bail};
 use arti_client::{TorClientConfig, TorClient};
 use rand::rngs::ThreadRng;
@@ -8,7 +8,7 @@ use tor_guardmgr::fallback::{FallbackList, FallbackDir};
 use tor_rtcompat::Runtime;
 
 use crate::{util::{IntervalLog, AsyncHandler}, scan::tcp_scan::Progress};
-use super::{tcp_scan::TcpScanner, RelayInfo, HashRelay};
+use super::{tcp_scan::TcpScanner, HashRelay, OwnedRelay};
 
 
 macro_rules! dbgi {
@@ -23,7 +23,7 @@ macro_rules! dbgd {
     );
 }
 
-pub type ScanResult = (RelayInfo, Result<()>);
+pub type ScanResult = (Arc<OwnedRelay>, Result<()>);
 
 
 
@@ -31,7 +31,7 @@ pub type ScanResult = (RelayInfo, Result<()>);
 pub async fn scan_relays_to_set<I>(relays: I, timeout: Duration, concurrency: usize, output: &mut HashSet<HashRelay>) -> Result<()>
 
 where 
-    I: Iterator<Item = RelayInfo>,
+    I: Iterator<Item = Arc<OwnedRelay>>,
 {
     async fn insert_to_set(output: &mut HashSet<HashRelay>, (relay, r): ScanResult) -> Result<()> {
         if r.is_ok() {
@@ -48,7 +48,7 @@ where
 
 pub async fn scan_relays<I, C, F>(mut relays: I, timeout: Duration, concurrency: usize, ctx: &mut C, func: &F) -> Result<()>
 where
-    I: Iterator<Item = RelayInfo>,
+    I: Iterator<Item = Arc<OwnedRelay>>,
     F: for<'local> AsyncHandler<'local, C, ScanResult>
 {
 
@@ -101,17 +101,17 @@ where
 
 
 #[derive(Debug, Clone, Default)]
-pub struct BuilInRelays {
+pub struct FallbackRelays {
     config: TorClientConfig,
 }
 
-impl BuilInRelays { 
+impl FallbackRelays { 
     pub fn len(&self) -> usize {
         let fallbacks: &FallbackList = self.config.as_ref();
         fallbacks.len()
     }
 
-    pub fn relays_iter(&self) -> impl Iterator<Item = RelayInfo> + '_ {
+    pub fn relays_iter(&self) -> impl Iterator<Item = Arc<OwnedRelay>> + '_ {
         let fallbacks: &FallbackList = self.config.as_ref();
         let rng = rand::thread_rng();
         let iter = FallbackIter {
@@ -120,7 +120,7 @@ impl BuilInRelays {
         };
         iter
         .take(fallbacks.len() * 3 /2)
-        .filter_map(|v|v.try_into().ok())
+        .filter_map(|v|v.try_into().ok().map(|v|Arc::new(v)))
     }
 }
 
@@ -158,7 +158,7 @@ pub async fn scan_fallbacks(fallbacks: &FallbackList) -> Result<HashSet<HashRela
         fallbacks,
     };
 
-    let mut iter = iter.map(|v| v.into()).take(fallbacks.len()*3/2);
+    let mut iter = iter.map(|v| Arc::new(v.into())).take(fallbacks.len()*3/2);
 
     async fn insert_to_set(output: &mut HashSet<HashRelay>, (relay, r): ScanResult) -> Result<()> {
         if r.is_ok() {

@@ -47,7 +47,7 @@ pub struct TcpScanner<T> {
 
 impl<T> TcpScanner<T> 
 where 
-    for<'a> T: GetAddrs<'a> + Send + Sync + 'static,
+    for<'a> T: AddrsIter<'a> + Send + Sync + 'static,
 {
     pub fn new(timeout: Duration, concurrency: usize) -> Self {
         let (tx0, rx0) = async_channel::bounded(concurrency * 2);
@@ -160,9 +160,9 @@ where
 
 
 
-pub trait GetAddrs<'a> {
+pub trait AddrsIter<'a> {
     type Iter: Iterator<Item = &'a SocketAddr> + Send;
-    fn get_addrs(&'a self) -> Self::Iter;
+    fn addrs_iter(&'a self) -> Self::Iter;
 }
 
 
@@ -173,7 +173,7 @@ async fn scan_task<T>(
     timeout: Duration,
 ) -> Result<()> 
 where 
-    for<'a> T: GetAddrs<'a> + Send + Sync + 'static,
+    for<'a> T: AddrsIter<'a> + Send + Sync + 'static,
 { 
     let mut _try_targets = 0;
     loop {
@@ -181,7 +181,7 @@ where
         match r {
             Ok(next) => {
                 let mut result = Ok(());
-                for addr in next.get_addrs() {
+                for addr in next.addrs_iter() {
                     let r = connect_with_timeout(addr, timeout).await;
                     _try_targets += 1;
                     dbgd!("No.{} connect result: [{}] -> [{:?}]", _try_targets, addr, r);

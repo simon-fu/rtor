@@ -1,3 +1,5 @@
+
+
 /// - curl -vv  -x socks5h://localhost:9150 http://wtfismyip.com/json
 /// - 申请bridge https://bridges.torproject.org/
 /// - run_periodic_events 会被每隔1秒调用一次，层层会调用到 pick_n_relays
@@ -15,30 +17,15 @@
 ///     https://gitlab.torproject.org/tpo/core/arti/-/merge_requests/686
 ///     https://gitlab.torproject.org/tpo/core/arti/-/milestones/10#tab-issues
 /// 
+/// - 超大文件用于测试下载速度 
+///     https://www.thinkbroadband.com/download 
+///     https://www.zhujizixun.com/4113.html
+
 
 /// - issue
 ///     dropping TorClient will stuck in tor_rtcompat::scheduler::TaskSchedule::sleep_until_wallclock() and burning cpu
 ///     已提交 https://gitlab.torproject.org/tpo/core/arti/-/issues/572
 
-
-
-
-
-// #![feature(unsafe_pin_internals)]
-
-use std::str::FromStr;
-use anyhow::Result;
-use strum::EnumString;
-use tracing_subscriber::EnvFilter;
-use crate::{proxy::run_proxy, simple::simple_tor_client};
-
-
-pub mod box_socks;
-pub mod box_tcp;
-pub mod util;
-pub mod scan;
-pub mod simple;
-pub mod proxy;
 
 /*
 
@@ -75,6 +62,27 @@ AbstractCircMgr::prepare_action  // action 是指circuit 是已经open，还是p
 AbstractCircMgr::plan_by_usage 
 */
 
+
+// #![feature(unsafe_pin_internals)]
+
+
+use std::str::FromStr;
+use anyhow::Result;
+use strum::EnumString;
+use tracing_subscriber::EnvFilter;
+use crate::{proxy::run_proxy, simple::simple_tor_client};
+
+
+pub mod box_socks;
+pub mod box_tcp;
+pub mod util;
+pub mod scan;
+pub mod simple;
+pub mod proxy;
+pub mod tls2;
+
+
+
 macro_rules! dbgd {
     ($($arg:tt)* ) => (
         tracing::info!($($arg)*) // comment out this line to disable log
@@ -85,6 +93,7 @@ macro_rules! dbgd {
 enum Cmd {
     Simple,
     Proxy,
+    // ChRaw,
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
@@ -104,9 +113,12 @@ async fn main() -> Result<()> {
     
     // let cmd = Cmd::from_str("Simple")?;
     let cmd = Cmd::from_str("Proxy")?;
+    // let cmd = Cmd::from_str("ChRaw")?;
+
     let r = match cmd {
         Cmd::Simple => simple_tor_client().await,
         Cmd::Proxy => run_proxy().await,
+        // Cmd::ChRaw => channel_raw::run_raw().await,
     };
     dbgd!("all finished with {:?}", r);
 

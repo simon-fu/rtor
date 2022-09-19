@@ -27,13 +27,19 @@ rand = "0.8.5"
 base64 = "0.13.0"
 strum = { version = "0.24", features = ["derive"] }
 
-serde = "=1.0.126"
+serde = { version = "=1.0.126", features = ["rc"] } 
 serde_derive = "=1.0.126"
 serde_json = "=1.0.65"
 
 fast-socks5 = "0.8.1"
 tokio-stream = "0.1.9"
 socks5-proto = "0.3.2"
+hyper = { version = "0.14.20", features = [ "client", "http1", "http2", "tcp" ] }
+bytes = "1.2.1"
+# rustls = "0.20.6"
+tokio-rustls = "0.23.4"
+webpki-roots = "0.22.4"
+lazy_static = "=1.4.0"
 
 # arti-client = { version = "0.5.0", features = [ "dirfilter", "experimental-api" ]}
 # tor-rtcompat = { version = "0.5.0", features = [ ]}
@@ -47,6 +53,9 @@ tor-netdir = {   path = "../submodules/arti/crates/tor-netdir", version = "0.5.0
 tor-netdoc = {   path = "../submodules/arti/crates/tor-netdoc", version = "0.5.0", features = [ ]}
 tor-guardmgr = { path = "../submodules/arti/crates/tor-guardmgr", version = "0.5.0" }
 tor-linkspec = { path = "../submodules/arti/crates/tor-linkspec", version = "0.4.0" }
+tor-chanmgr = { path = "../submodules/arti/crates/tor-chanmgr", version = "0.5.0" }
+tor-proto = { path = "../submodules/arti/crates/tor-proto", version = "0.5.0" }
+tor-protover = { path = "../submodules/arti/crates/tor-protover", version = "0.3.0" }
 
 # #  branch = "simon-hack1"
 # arti-client = { git = "https://github.com/simon-fu/arti.git", rev = "9e391009", version = "0.5.0", features = [ "dirfilter", "experimental-api" ] }
@@ -64,3 +73,5 @@ tor-linkspec = { path = "../submodules/arti/crates/tor-linkspec", version = "0.4
 # tor-linkspec = { git = "https://github.com/simon-fu/arti.git", rev = "9e391009", version = "0.4.0", features = [ ] }
 
 
+[features]
+hack = []
