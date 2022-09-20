@@ -1,11 +1,10 @@
-use std::{sync::Arc, time::Duration, collections::HashSet, convert::{TryInto, TryFrom}};
-use std::path::PathBuf;
+use std::{sync::Arc, collections::HashSet, convert::TryInto};
 
 use anyhow::{Result, Context, bail};
-use arti_client::{config::{TorClientConfigBuilder, CfgPath}, TorClient, StreamPrefs, DangerouslyIntoTorAddr};
+use arti_client::{config::{TorClientConfigBuilder}, TorClient, StreamPrefs, DangerouslyIntoTorAddr};
 use tor_linkspec::HasRelayIds;
 use tracing::{debug, info};
-use crate::{scan::{self, HashRelay, OwnedRelay}, proxy::{scan_bootstraps, ProxyConfig, Args} };
+use crate::{scan::{self, HashRelay}, proxy::{scan_bootstraps, ProxyConfig, Args} };
 
 use socks5_proto::{HandshakeRequest, HandshakeMethod, HandshakeResponse, Request, Response, Reply, Address, Command};
 use tokio::{net::{TcpListener, TcpStream}, sync::oneshot};
@@ -13,7 +12,7 @@ use tor_netdir::{NetDir, hack_netdir};
 use tor_rtcompat::Runtime;
 
 
-use crate::scan::{FallbackRelays, ScanResult};
+use crate::scan::ScanResult;
 
 
 

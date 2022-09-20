@@ -1,7 +1,7 @@
 
 use std::{pin::Pin, task::{Context, Poll}, marker::PhantomData, time::{Duration, Instant}, path::Path};
 use std::future::Future;
-use anyhow::Result;
+use anyhow::{Result, Context as AnyContext};
 use tokio::fs::File;
 
 
@@ -98,4 +98,31 @@ pub async fn create_file(file_path: impl AsRef<Path>) -> Result<File>
     
     let file = File::create(file_path).await?;
     Ok(file)
+}
+
+pub async fn simple_http_get<S>(stream: &mut S ) -> Result<String>
+    where
+        S: futures::AsyncWriteExt + futures::AsyncReadExt + Unpin,
+{ 
+
+    // dbgd!("sending GET request...");
+
+    stream
+        .write_all(b"GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
+        .await?;
+
+    // IMPORTANT: Make sure the request was written.
+    // Arti buffers data, so flushing the buffer is usually required.
+    stream.flush().await?;
+
+    // dbgd!("reading response...");
+
+    // Read and print the result.
+    let mut buf = Vec::new();
+    stream.read_to_end(&mut buf).await?;
+
+    let s = String::from_utf8(buf).with_context(||"invalid response")?;
+    // dbgd!("{}", String::from_utf8_lossy(&buf));
+
+    Ok(s)
 }

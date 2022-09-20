@@ -156,11 +156,14 @@ where
 //     Ok(set)
 // }
 
+pub async fn load_ids_from_file(file: impl AsRef<Path>) -> Result<HashSet<Ed25519Identity>> {
+    load_items_from_file::<_, Ed25519Identity, Ed25519Identity>(file).await
+}
 
-pub async fn load_items_from_file<B, S>(file: impl AsRef<Path>) -> Result<B> 
+pub async fn load_items_from_file<B, I, S>(file: impl AsRef<Path>) -> Result<B> 
 where
     B: Extend<S>+Default,
-    // I: From<S>,
+    I: From<S>,
     S: for<'a> Deserialize<'a>,
 {
     let file = File::open(&file).await.with_context(||format!("Failed to open file [{:?}]", file.as_ref()))?;
@@ -177,7 +180,7 @@ where
         match r {
             Some(line) => {
                 let item: S = serde_json::from_str(&line)?;
-                set.extend(Some(item));
+                set.extend(Some(item.into()));
             },
             None => break,
         }

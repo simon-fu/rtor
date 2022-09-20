@@ -44,15 +44,22 @@ where
     Ok(())
 }
 
+pub async fn scan_relays<I, C, F>(relays: I, timeout: Duration, concurrency: usize, ctx: &mut C, func: &F) -> Result<()>
+where
+    I: Iterator<Item = Arc<OwnedRelay>>,
+    F: for<'local> AsyncHandler<'local, C, ScanResult>
+{
+    let mut scanner = TcpScanner::new(timeout, concurrency);
+    scan_relays2(&mut scanner, relays, ctx, func).await
+}
 
-
-pub async fn scan_relays<I, C, F>(mut relays: I, timeout: Duration, concurrency: usize, ctx: &mut C, func: &F) -> Result<()>
+pub async fn scan_relays2<I, C, F>(scanner: &mut TcpScanner<Arc<OwnedRelay>>, mut relays: I,  ctx: &mut C, func: &F) -> Result<()>
 where
     I: Iterator<Item = Arc<OwnedRelay>>,
     F: for<'local> AsyncHandler<'local, C, ScanResult>
 {
 
-    let mut scanner = TcpScanner::new(timeout, concurrency);
+    
 
     let mut last_relay = relays.next().map(|v|v.into());
 

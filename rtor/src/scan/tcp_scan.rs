@@ -1,11 +1,13 @@
 
 use std::{net::SocketAddr, time::Duration};
+use futures::Future;
 // use async_channel::{self, RecvError, TryRecvError};
 use tokio::{net::TcpStream, task::JoinHandle};
 use anyhow::{Result, bail};
 use tracing::Instrument;
 
-use crate::util::{AsyncHandler, async_ch_util};
+use crate::{util::{AsyncHandler, async_ch_util}};
+
 
 macro_rules! dbgd {
     ($($arg:tt)* ) => (
@@ -28,6 +30,27 @@ macro_rules! dbgd {
 //     }
 // }
 
+pub trait Connector: Clone + Send {
+    type ConnectFuture<'a>: Future<Output = Result<()>> + Send where Self: 'a;
+
+    fn connect<'a>(&'a mut self, addr: &'a str) -> Self::ConnectFuture<'_>;
+}
+
+#[derive(Debug, Clone)]
+pub struct TcpConnector;
+
+impl Connector for TcpConnector {
+    type ConnectFuture<'a> = impl Future<Output = Result<()>> where Self: 'a;
+
+    fn connect<'a>(&'a mut self, addr: &'a str) -> Self::ConnectFuture<'_> {
+        async move {
+            TcpStream::connect(addr).await?;
+            Ok(())
+        }
+    }
+}
+
+
 
 /// Scan Result 
 type SResult<T> = (T, Result<()>);
@@ -49,17 +72,26 @@ impl<T> TcpScanner<T>
 where 
     for<'a> T: AddrsIter<'a> + Send + Sync + 'static,
 {
-    pub fn new(timeout: Duration, concurrency: usize) -> Self {
+    pub fn new(timeout: Duration, concurrency: usize ) -> Self {
+        Self::with_connector(timeout, concurrency, TcpConnector{})
+    }
+
+    pub fn with_connector<C: Connector+'static>(timeout: Duration, concurrency: usize, connector: C ) -> Self {
         let (tx0, rx0) = async_channel::bounded(concurrency * 2);
         let (tx1, rx1) = async_channel::bounded(concurrency * 2);
+        // let socks_args = socks_args.map(|v|Arc::new(v));
+        
         let mut tasks = Vec::with_capacity(concurrency);
         for n in 0..concurrency {
             let tx = tx1.clone();
             let rx = rx0.clone();
+            // let socks_args = socks_args.clone();
+            let mut connector = connector.clone();
+
             let name = format!("task{}", n + 1);
             let span = tracing::span!(parent:None, tracing::Level::INFO, "", s = &name[..]);
             let task = tokio::spawn(async move {
-                let r = scan_task(tx, rx, timeout).await;
+                let r = scan_task(&mut connector, tx, rx, timeout).await;
                 dbgd!("finished with {:?}", r);
                 r
             }.instrument(span));
@@ -167,13 +199,16 @@ pub trait AddrsIter<'a> {
 
 
 
-async fn scan_task<T>(
+async fn scan_task<T, C>(
+    // socks_args: Option<Arc<SocksArgs>>,
+    connector: &mut C,
     tx: async_channel::Sender<SResult<T>>, 
     rx: async_channel::Receiver<T>,
     timeout: Duration,
 ) -> Result<()> 
 where 
     for<'a> T: AddrsIter<'a> + Send + Sync + 'static,
+    C: Connector,
 { 
     let mut _try_targets = 0;
     loop {
@@ -182,7 +217,12 @@ where
             Ok(next) => {
                 let mut result = Ok(());
                 for addr in next.addrs_iter() {
-                    let r = connect_with_timeout(addr, timeout).await;
+                    let r = connect_with_timeout(connector, addr, timeout).await;
+                    // let r = match &socks_args {
+                    //     Some(socks_args) => connect_with_socks_timeout(socks_args, addr, timeout).await,
+                    //     None => connect_with_timeout(addr, timeout).await,
+                    // };
+
                     _try_targets += 1;
                     dbgd!("No.{} connect result: [{}] -> [{:?}]", _try_targets, addr, r);
                     if r.is_ok() {
@@ -197,8 +237,17 @@ where
     }
 }
 
-async fn connect_with_timeout(addr: &SocketAddr, timeout: Duration) -> Result<()> {
-    let _s = tokio::time::timeout(timeout, TcpStream::connect(addr)).await??;    
+async fn connect_with_timeout<C>(connector: &mut C, addr: &SocketAddr, timeout: Duration) -> Result<()> 
+where
+    C: Connector,
+{
+    let _s = tokio::time::timeout(timeout, connector.connect(&addr.to_string())).await??;    
     Ok(())
 }
 
+
+
+// async fn connect_with_socks_timeout(socks_args: &SocksArgs, addr: &SocketAddr, timeout: Duration) -> Result<()> {
+//     let _s = tokio::time::timeout(timeout, socks::connect_to_with_socks(socks_args, addr)).await??;    
+//     Ok(())
+// }

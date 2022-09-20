@@ -21,6 +21,12 @@ use futures::FutureExt;
 
 use crate::box_tcp::{BoxTcpStream, box_tcp_stream, BoxTcpListener};
 
+macro_rules! dbgd {
+    ($($arg:tt)* ) => (
+        tracing::debug!($($arg)*) // comment out this line to disable log
+    );
+}
+
 /// TODO: add doc
 #[derive(Debug, Clone)]
 pub struct SocksArgs {
@@ -162,7 +168,7 @@ where
         'b: 'c,
         Self: 'c,
     {
-        // println!("====== try tcp connecting to {}", addr);
+        // dbgd!("====== try tcp connecting to {}", addr);
         // let target_addr = addr.ip().to_string();
         // let target_port = addr.port();
         // let r = if let Some(username) = &self.username {
@@ -214,7 +220,7 @@ where
         'b: 'c,
         Self: 'c,
     {
-        println!("====== try tcp listening on {}", addr);
+        dbgd!("====== try tcp listening on {}", addr);
         // PendingForever(PhantomData::default()).boxed()
         self.rt
         .listen(addr)
@@ -230,11 +236,7 @@ struct Targets {
     // socks_one: Option<String>,
 }
 
-macro_rules! dbgd {
-    ($($arg:tt)* ) => (
-        tracing::info!($($arg)*) // comment out this line to disable log
-    );
-}
+
 
 async fn connect_to(
     socks_args: &Option<SocksArgs>,
@@ -297,7 +299,7 @@ async fn do_connect_to(
         let use_socks = check_use_socks(socks_args, &addr0, targets);
         if use_socks  {
             // let stream = connect_to_with_socks(socks_args, addr).await?;
-            let stream = tokio::time::timeout(TIMEOUT, connect_to_with_socks(socks_args, addr)).await??;
+            let stream = tokio::time::timeout(TIMEOUT, connect_to_with_socks(socks_args, &addr0)).await??;
             targets.lock().socks_targets.insert(addr0);
             return Ok(stream)
         }
@@ -331,15 +333,31 @@ async fn do_connect_to(
     }
 }
 
-async fn connect_to_with_socks(
+pub async fn connect_to_with_socks(
     socks_args: &SocksArgs,
-    addr: &SocketAddr,
+    addr: &str,
     // targets: &Arc<Mutex<Targets>>,
 ) -> IoResult<SocksTcpStream> {
     dbgd!("====== try socks tcp connecting to [{}]", addr);
 
-    let target_addr = addr.ip().to_string();
-    let target_port = addr.port();
+    
+
+    // let addr = addr.to_socket_addrs()?.next()
+    // .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("invalid address [{}]", addr)) )?;
+
+    // let target_addr = addr.ip().to_string();
+    // let target_port = addr.port();
+
+    let mut split = addr.split(':');
+
+    let target_addr = split.next()
+    .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("invalid address [{}]", addr)) )?
+    .to_owned();
+
+    let target_port: u16 = split.next()
+    .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("invalid address [{}]", addr)) )?
+    .parse().map_err(|_e| std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("invalid address [{}]", addr)) )?;
+
     let r = if let Some(username) = &socks_args.username {
         let password = socks_args.password.as_deref().unwrap_or_else(||"").to_owned();
         Socks5Stream::connect_with_password(

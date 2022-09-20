@@ -57,7 +57,7 @@ pub struct RelayPool {
 }
 
 impl RelayPool {
-    pub fn new(relays: RelayMap) -> Self { 
+    pub fn new(relays: RelayMap, reachables: Option<HashSet<Ed25519Identity>>) -> Self { 
         let mut exit_ids = Vec::new();
         for (id, relay) in relays.iter() {
             if relay.is_flagged_exit() {
@@ -65,13 +65,28 @@ impl RelayPool {
             }
         }
 
+        let mut guards = Vec::new();
+        let reachables = match reachables {
+            Some(set) => { 
+                for id in set.iter() {
+                    if let Some(relay) = relays.get(id) {
+                        if relay.is_flagged_guard() {
+                            guards.push(id.clone());
+                        }
+                    }
+                }
+                set
+            },
+            None => HashSet::new(),
+        };
+
         let (tx, rx) = watch::channel(0);
         Self { 
             relays,
             exit_ids,
             data: Mutex::new(PoolData {
-                guards: Vec::new(),
-                reachables: HashSet::new(),
+                guards,
+                reachables,
                 state: PoolState::default(),
                 // netdir,
             }),
@@ -200,7 +215,7 @@ impl RelayPool {
     }
 
     fn diff_action(&self, watcher: &mut Watcher) -> Result<PoolAction> { 
-        let mut action = PoolAction::None;
+        let mut action ;
         let data = self.data.lock();
         if data.state.epoch != watcher.state.epoch { 
             if data.state.epoch != (watcher.state.epoch + 1) {

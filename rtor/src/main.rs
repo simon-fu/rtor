@@ -1,4 +1,4 @@
-
+#![feature(type_alias_impl_trait)]
 
 /// - curl -vv  -x socks5h://localhost:9150 http://wtfismyip.com/json
 /// - 申请bridge https://bridges.torproject.org/

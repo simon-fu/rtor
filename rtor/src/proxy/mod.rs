@@ -2,7 +2,7 @@
 mod proxy;
 pub use proxy::*;
 
-// #[cfg(feature="hack")]
+#[cfg(feature="hack")]
 mod proxy_hack;
 
 mod proxy_ch2;

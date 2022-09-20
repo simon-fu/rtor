@@ -1,14 +1,12 @@
-use std::{sync::Arc, time::Duration, collections::HashSet, convert::{TryInto, TryFrom}};
+use std::{time::Duration, collections::HashSet, convert::TryFrom};
 use std::path::PathBuf;
 
-use anyhow::{Result, Context, bail};
-use arti_client::{config::{TorClientConfigBuilder, CfgPath}, TorClient, StreamPrefs, DangerouslyIntoTorAddr};
-use tracing::{debug, info};
+use anyhow::Result;
+use arti_client::config::CfgPath;
+use tracing::info;
 use crate::{scan::{self, HashRelay}, proxy::buildin_relays};
 
-
-
-use crate::scan::{FallbackRelays,};
+use crate::scan::FallbackRelays;
 
 
 
@@ -31,6 +29,7 @@ pub struct Args {
     override_min_guards: Option<usize>,
     override_normal_guards: Option<usize>,
     scan_interval_secs: Option<u64>,
+    pub out_socks: Option<String>,
 }
 
 impl Args {
@@ -87,6 +86,19 @@ impl Args {
         let secs = self.scan_interval_secs.unwrap_or_else(|| 60*60*24);
         Duration::from_secs(secs)
     }
+
+    pub fn out_socks(&self) -> Option<String> {
+        match &self.out_socks {
+            Some(s) => Some(s.clone()),
+            None => { 
+                if cfg!(target_os = "macos") {
+                    Some("127.0.0.1:5000".to_owned())
+                } else {
+                    None
+                }
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -101,6 +113,7 @@ pub struct ProxyConfig {
     pub override_min_guards: usize,
     pub override_normal_guards: usize,
     pub scan_interval: Duration,
+    pub out_socks: Option<String>,
 
     pub state_dir: PathBuf,
     pub cache_dir: PathBuf,
@@ -122,6 +135,7 @@ impl TryFrom<&Args> for ProxyConfig {
             override_min_guards: src.override_min_guards(),
             override_normal_guards: src.override_normal_guards(),
             scan_interval: src.scan_interval(),
+            out_socks: src.out_socks(),
 
             state_dir: CfgPath::new(src.state_dir()).path()?,
             cache_dir: CfgPath::new(src.cache_dir()).path()?,
